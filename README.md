@@ -137,7 +137,7 @@ cd app && npm test      # node --test
 
 **Releases:** pushing a `v*` tag (e.g. `git tag v0.10.0 && git push origin v0.10.0`) runs the
 release workflow, which builds the multi-arch image and publishes it to
-`ghcr.io/omegatron/tinkernet-tikspot` for the RouterOS App deploy below.
+`ghcr.io/krusherdom/tinkernet-tikspot` for the RouterOS App deploy below.
 
 ## Plugins
 
@@ -162,7 +162,7 @@ Two paths, depending on RouterOS version:
 
 1. **RouterOS 7.22+ — container "App"** *(simplest; auto-provisions the network)*: add
    [`deploy/tikspot.app.yml`](deploy/tikspot.app.yml) with `/app add network=lan` and the
-   router pulls the public multi-arch image (`ghcr.io/omegatron/tinkernet-tikspot`,
+   router pulls the public multi-arch image (`ghcr.io/krusherdom/tinkernet-tikspot`,
    published on each release tag) and creates the veth, bridge port, IP and NAT for you.
    See [`docs/deploy-app.md`](docs/deploy-app.md).
 2. **File-based** *(any RouterOS 7 with the `container` package)*: build the arm64 tar,
@@ -216,7 +216,7 @@ agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Reporting issues & security
 
-- **Bugs / features:** open a [GitHub issue](https://github.com/omegatron/tinkernet-tikspot/issues/new/choose)
+- **Bugs / features:** open a [GitHub issue](https://github.com/krusherdom/tinkernet-tikspot/issues/new/choose)
   using the bug-report or feature-request template.
 - **Security vulnerabilities:** please **don't** file a public issue — report privately via the
   repo's **Security → Report a vulnerability** tab. See [`SECURITY.md`](SECURITY.md).

@@ -992,8 +992,8 @@
   // live Test panel over POST /api/plugins/:id/test.
   var CANON_FIELDS = ['firstName', 'lastName', 'fullName', 'room', 'mobile', 'email', 'checkIn', 'checkOut', 'bookingRef'];
   var NORMALIZERS = ['trim', 'name', 'phone', 'email', 'digits', 'upper'];
-  var GUEST_API_DOCS = 'https://github.com/omegatron/tinkernet-tikspot/blob/main/examples/guest-api/README.md';
-  var CATALOG_DEFAULT_URL = 'https://raw.githubusercontent.com/omegatron/tinkernet-tikspot/main/plugins/index.json';
+  var GUEST_API_DOCS = 'https://github.com/krusherdom/tinkernet-tikspot/blob/main/examples/guest-api/README.md';
+  var CATALOG_DEFAULT_URL = 'https://raw.githubusercontent.com/krusherdom/tinkernet-tikspot/main/plugins/index.json';
   var routeSub = '';          // the part after "tab/" in the hash
   var guestsTimer = null;     // Guests tab auto-refresh
   var pg = null;              // plugin editor state (null when listing)

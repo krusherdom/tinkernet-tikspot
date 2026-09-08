@@ -19,7 +19,7 @@ representing the project in public spaces.
 
 If you experience or witness unacceptable behaviour, please report it privately to the
 maintainer through GitHub — open a private report via the repository's
-**[Security → Report a vulnerability](https://github.com/omegatron/tinkernet-tikspot/security)**
+**[Security → Report a vulnerability](https://github.com/krusherdom/tinkernet-tikspot/security)**
 channel (it routes privately to the maintainer and need not be security-specific), or contact
 the repository owner directly. All reports will be reviewed and handled confidentially.
 

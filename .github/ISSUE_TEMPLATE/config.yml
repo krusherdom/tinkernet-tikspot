@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Report a security vulnerability
-    url: https://github.com/omegatron/tinkernet-tikspot/security/advisories/new
+    url: https://github.com/krusherdom/tinkernet-tikspot/security/advisories/new
     about: Please report security issues privately here, not as a public issue.
   - name: Questions & discussion
-    url: https://github.com/omegatron/tinkernet-tikspot/discussions
+    url: https://github.com/krusherdom/tinkernet-tikspot/discussions
     about: Ask setup/usage questions or share ideas (enable Discussions to use this).

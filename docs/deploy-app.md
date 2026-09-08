@@ -17,7 +17,7 @@ The repo's release workflow publishes a **multi-arch (arm64 + amd64)** image to 
 Container Registry on each version tag:
 
 ```
-ghcr.io/omegatron/tinkernet-tikspot:0.10.0   (and :latest)
+ghcr.io/krusherdom/tinkernet-tikspot:0.10.0   (and :latest)
 ```
 
 RouterOS pulls the arm64 variant automatically. The GHCR package must be **Public** (the

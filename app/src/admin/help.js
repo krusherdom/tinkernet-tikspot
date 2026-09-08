@@ -2,7 +2,7 @@
 // symptom -> likely cause -> where-to-check table. Pure data (no DB, no HTTP) so
 // it is trivial to unit-test and safe to import from setup.js without cycles.
 
-const REPO_BASE = 'https://github.com/omegatron/tinkernet-tikspot/blob/main';
+const REPO_BASE = 'https://github.com/krusherdom/tinkernet-tikspot/blob/main';
 const DOCS_BASE = `${REPO_BASE}/docs`;
 
 // Internal reference paths used to build individual checklist/symptom links.

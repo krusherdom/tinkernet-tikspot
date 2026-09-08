@@ -8,7 +8,7 @@
 // secrets empty — the admin reviews and fills them in before enabling.
 
 export const DEFAULT_CATALOG_URL =
-  'https://raw.githubusercontent.com/omegatron/tinkernet-tikspot/main/plugins/index.json';
+  'https://raw.githubusercontent.com/krusherdom/tinkernet-tikspot/main/plugins/index.json';
 
 const GH_WEB = /^https?:\/\/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?\/(blob|tree)\/([^/]+)\/?(.*)$/;
 const GH_RAW = /^https?:\/\/raw\.githubusercontent\.com\/([^/]+)\/([^/]+)\/([^/]+)\/(.*)$/;

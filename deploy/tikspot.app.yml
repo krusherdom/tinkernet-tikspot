@@ -10,7 +10,7 @@
 
 name: tikspot
 descr: Captive portal + FreeRADIUS hotspot manager for MikroTik
-page: https://github.com/omegatron/tinkernet-tikspot
+page: https://github.com/krusherdom/tinkernet-tikspot
 category: network
 default-credentials: set-at-first-run-wizard
 url-path: /admin
@@ -19,7 +19,7 @@ services:
     # Multi-arch public image (arm64 + amd64) published by the repo's release workflow.
     # RouterOS pulls the variant matching your router's CPU automatically. Pin a release
     # tag (or use :latest). See docs/deploy-app.md for the registry setup.
-    image: ghcr.io/omegatron/tinkernet-tikspot:0.10.0
+    image: ghcr.io/krusherdom/tinkernet-tikspot:0.10.0
     ports:
       # Admin UI + captive portal (HTTP). Exposed on the router's address:8088 for admin
       # convenience (http://<router>:8088/admin); hotspot clients reach the portal at the

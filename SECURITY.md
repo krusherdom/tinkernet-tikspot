@@ -3,7 +3,7 @@
 ## Supported versions
 
 Tikspot is released as a rolling line — only the **latest** published version
-(`ghcr.io/omegatron/tinkernet-tikspot:latest` and the matching git tag) receives
+(`ghcr.io/krusherdom/tinkernet-tikspot:latest` and the matching git tag) receives
 security fixes. Please reproduce any issue against the latest release before reporting.
 
 ## Reporting a vulnerability
@@ -12,7 +12,7 @@ security fixes. Please reproduce any issue against the latest release before rep
 
 Report privately through GitHub's built-in advisory flow:
 
-1. Go to the repository's **[Security](https://github.com/omegatron/tinkernet-tikspot/security)** tab.
+1. Go to the repository's **[Security](https://github.com/krusherdom/tinkernet-tikspot/security)** tab.
 2. Click **Report a vulnerability**.
 3. Describe the issue, the affected version, and steps to reproduce.
 

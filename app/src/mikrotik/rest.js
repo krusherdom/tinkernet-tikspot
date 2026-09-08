@@ -378,7 +378,7 @@ export async function autoConfigure(router, { containerIp, nasSecret, serverHost
 // `ok` is kept as a compat boolean (=== status === 'pass'), `raw` is the actual
 // RouterOS line for a pass (the RADIUS secret is never included), and top-level
 // `ok` is true when every REQUIRED check PASSES ('unknown' never counts as a pass).
-const DOCS_BASE = 'https://github.com/omegatron/tinkernet-tikspot/blob/main/docs/setup-mikrotik.md';
+const DOCS_BASE = 'https://github.com/krusherdom/tinkernet-tikspot/blob/main/docs/setup-mikrotik.md';
 
 function mk(component, status, opts = {}) {
   return {
