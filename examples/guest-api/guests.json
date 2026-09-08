@@ -1,0 +1,85 @@
+{
+  "_comment": "checkIn/checkOut accept 'NOW±<N>h' / 'NOW±<N>d' tokens (resolved once at server startup relative to the reference instant — real time, or a fixed anchor when FIXED_DATES=1) or a literal ISO 8601 string.",
+  "guests": [
+    {
+      "firstName": "Grace",
+      "lastName": "Sato",
+      "room": "101",
+      "mobile": "+44 7700 900111",
+      "email": "grace.sato@example.com",
+      "bookingRef": "BK1001",
+      "checkIn": "NOW-1d",
+      "checkOut": "NOW+3d"
+    },
+    {
+      "firstName": "Marcus",
+      "lastName": "Delgado",
+      "room": "102",
+      "mobile": "+44 7700 900112",
+      "email": "marcus.delgado@example.com",
+      "bookingRef": "BK1002",
+      "checkIn": "NOW-2d",
+      "checkOut": "NOW+3h"
+    },
+    {
+      "firstName": "Priya",
+      "lastName": "Nair",
+      "room": "103",
+      "mobile": "+44 7700 900113",
+      "email": "priya.nair@example.com",
+      "bookingRef": "BK1003",
+      "checkIn": "NOW-3h",
+      "checkOut": "NOW+4d"
+    },
+    {
+      "firstName": "Tomasz",
+      "lastName": "Wysocki",
+      "room": "104",
+      "mobile": "+44 7700 900114",
+      "email": "tomasz.wysocki@example.com",
+      "bookingRef": "BK1004",
+      "checkIn": "NOW-1d",
+      "checkOut": "NOW+2d"
+    },
+    {
+      "firstName": "Amara",
+      "lastName": "Okoye",
+      "room": "105",
+      "mobile": "+44 7700 900115",
+      "email": "amara.okoye@example.com",
+      "bookingRef": "BK1005",
+      "checkIn": "NOW-2d",
+      "checkOut": "NOW+1d"
+    },
+    {
+      "firstName": "Liam",
+      "lastName": "Fitzgerald",
+      "room": "106",
+      "mobile": "+44 7700 900116",
+      "email": "liam.fitzgerald@example.com",
+      "bookingRef": "BK1006",
+      "checkIn": "NOW-6d",
+      "checkOut": "NOW-3d"
+    },
+    {
+      "firstName": "Sofia",
+      "lastName": "Bianchi",
+      "room": "107",
+      "mobile": "+44 7700 900117",
+      "email": "sofia.bianchi@example.com",
+      "bookingRef": "BK1007",
+      "checkIn": "NOW+3d",
+      "checkOut": "NOW+7d"
+    },
+    {
+      "firstName": "Kenji",
+      "lastName": "Watanabe",
+      "room": "108",
+      "mobile": "+44 7700 900118",
+      "email": "kenji.watanabe@example.com",
+      "bookingRef": "BK1008",
+      "checkIn": "NOW+40d",
+      "checkOut": "NOW+45d"
+    }
+  ]
+}

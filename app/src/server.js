@@ -23,9 +23,15 @@ import setupRoutes from './admin/setup.js';
 import logsRoutes from './admin/logs.js';
 import systemRoutes from './admin/system.js';
 import backupRoutes from './admin/backup.js';
+import settingsRoutes from './admin/settingsRoutes.js';
+import announcementRoutes from './admin/announcements.js';
+import pluginRoutes from './admin/plugins.js';
 import { processMacGrants, sweepMacSessions } from './mac/grants.js';
 import { sweepVouchers } from './voucher/sweeper.js';
 import { sweepMidnightExpiry } from './radius/midnight.js';
+import { sweepRetention } from './admin/retention.js';
+import { sweepPluginGrants } from './plugins/grants.js';
+import { logEvent } from './admin/events.js';
 
 const here = (p) => fileURLToPath(new URL(p, import.meta.url));
 
@@ -76,14 +82,27 @@ await app.register(fastifyStatic, {
   decorateReply: false,
 });
 
-// Health + status.
-app.get('/healthz', async () => ({
-  status: 'ok',
-  service: 'tikspot',
-  version: VERSION,
-  phase: 4,
-  ts: new Date().toISOString(),
-}));
+// The admin shell is static under /admin/; make the bare path work too.
+app.get('/admin', async (_req, reply) => reply.redirect('/admin/', 302));
+
+// Health + status. /healthz actually touches the DB so a broken SQLite file
+// shows up here (the router's /tool/fetch triage step) instead of staying green.
+app.get('/healthz', async (_req, reply) => {
+  let dbOk = true;
+  try {
+    db.prepare('SELECT 1 FROM settings LIMIT 1').get();
+  } catch {
+    dbOk = false;
+  }
+  if (!dbOk) reply.code(503);
+  return {
+    status: dbOk ? 'ok' : 'degraded',
+    service: 'tikspot',
+    version: VERSION,
+    db: dbOk,
+    ts: new Date().toISOString(),
+  };
+});
 
 app.get('/api/status', async (_req, reply) => {
   try {
@@ -108,18 +127,37 @@ await app.register(manageRoutes);
 await app.register(logsRoutes);
 await app.register(systemRoutes);
 await app.register(backupRoutes);
+await app.register(settingsRoutes);
+await app.register(announcementRoutes);
+await app.register(pluginRoutes);
 await app.register(portalRoutes);
 
-// Background sweeps: MAC re-auth grants/expiry, and date-gated voucher windows.
+// Background sweeps: MAC re-auth grants/expiry, date-gated voucher windows,
+// midnight-expiry plans, and daily log retention. Each sweep runs in its own
+// try so one failure can't starve the others; failures are recorded as events
+// (throttled per sweep so a persistent fault doesn't flood the log).
 const SWEEP_INTERVAL_MS = Number(process.env.TIKSPOT_MAC_INTERVAL_MS ?? 20000);
+const SWEEPS = [
+  ['mac-grants', () => processMacGrants(db)],
+  ['mac-expiry', () => sweepMacSessions(db)],
+  ['vouchers', () => sweepVouchers(db)],
+  ['midnight', () => sweepMidnightExpiry(db, app.log)],
+  ['retention', () => sweepRetention(db, app.log)],
+  ['plugin-grants', () => sweepPluginGrants(db)],
+];
+const sweepFailedAt = new Map();
 const sweepTimer = setInterval(() => {
-  try {
-    processMacGrants(db);
-    sweepMacSessions(db);
-    sweepVouchers(db);
-    sweepMidnightExpiry(db, app.log);
-  } catch (err) {
-    app.log.warn({ err: String(err) }, 'background sweep tick failed');
+  for (const [name, fn] of SWEEPS) {
+    try {
+      fn();
+    } catch (err) {
+      app.log.warn({ err: String(err) }, `background sweep "${name}" failed`);
+      const last = sweepFailedAt.get(name) || 0;
+      if (Date.now() - last > 10 * 60 * 1000) {
+        sweepFailedAt.set(name, Date.now());
+        logEvent(db, 'warn', 'sweep', `Background sweep "${name}" failed`, String(err?.message || err));
+      }
+    }
   }
 }, SWEEP_INTERVAL_MS);
 sweepTimer.unref();

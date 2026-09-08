@@ -1,13 +1,16 @@
 {
   "name": "tikspot",
-  "version": "0.7.0",
+  "version": "0.15.0",
   "private": true,
   "description": "MikroTik hotspot container: FreeRADIUS + live captive portal + admin portal",
   "scripts": {
     "build:local": "docker buildx build --load --provenance=false --sbom=false --platform linux/amd64 -t tikspot:dev -f docker/Dockerfile . && node scripts/check-size.mjs tikspot:dev",
     "build:release": "docker buildx build --platform linux/arm64,linux/amd64 -t tikspot:latest -f docker/Dockerfile .",
     "export:rb5009": "powershell -ExecutionPolicy Bypass -File scripts/export-rb5009.ps1",
-    "size": "node scripts/check-size.mjs tikspot:dev"
+    "size": "node scripts/check-size.mjs tikspot:dev",
+    "guest-api": "node examples/guest-api/server.js",
+    "rms-mock": "node examples/rms-mock/server.js",
+    "test": "cd app && npm test"
   },
   "license": "MIT"
 }

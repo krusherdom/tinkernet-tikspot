@@ -1,0 +1,172 @@
+{
+  "_comment": "arrivalDate/departureDate accept a literal 'YYYY-MM-DD HH:MM:SS' string or a relative 'NOW±<N>h' / 'NOW±<N>d' token, resolved once at server startup relative to the instant the process started (see resolveDate() in server.js). All fictional data. Note: 'status' reflects what the PMS record actually says — a reservation can be 'arrived'/'confirmed' with dates well in the past if front-desk staff haven't marked it departed yet (this is deliberate: it's what the rms-cloud-*.json recipes' stay-window check needs to catch).",
+
+  "areas": [
+    { "id": 10, "name": "101", "propertyId": 1 },
+    { "id": 11, "name": "Room 102", "propertyId": 1 },
+    { "id": 12, "name": "Villa 7", "propertyId": 1 },
+    { "id": 13, "name": "203", "propertyId": 1 }
+  ],
+
+  "guests": [
+    {
+      "id": 9001,
+      "guestGiven": "Olivia",
+      "guestSurname": "Bennett",
+      "email": "olivia.bennett@example.com",
+      "mobile": "+61 412 000 001",
+      "phone": ""
+    },
+    {
+      "id": 9002,
+      "guestGiven": "Marcus",
+      "guestSurname": "Delgado",
+      "email": "marcus.delgado@example.com",
+      "mobile": "+61 412 000 002",
+      "phone": ""
+    },
+    {
+      "id": 9003,
+      "guestGiven": "Priya",
+      "guestSurname": "Nair",
+      "email": "priya.nair@example.com",
+      "mobile": "+61 412 000 003",
+      "phone": ""
+    },
+    {
+      "id": 9004,
+      "guestGiven": "Tomasz",
+      "guestSurname": "Wysocki",
+      "email": "tomasz.wysocki@example.com",
+      "mobile": "+61 412 000 004",
+      "phone": ""
+    },
+    {
+      "id": 9005,
+      "guestGiven": "Freya",
+      "guestSurname": "Holm",
+      "email": "freya.holm@example.com",
+      "mobile": "+61 412 000 005",
+      "phone": ""
+    },
+    {
+      "id": 9006,
+      "guestGiven": "Grace",
+      "guestSurname": "Sato",
+      "email": "grace.sato@example.com",
+      "mobile": "+61 412 000 006",
+      "phone": "",
+      "contacts": [
+        {
+          "given": "Noah",
+          "surname": "Sato",
+          "email": "noah.sato@example.com",
+          "mobile": "+61 412 000 016",
+          "contactType": "family"
+        }
+      ]
+    },
+    {
+      "id": 9007,
+      "guestGiven": "Isabelle",
+      "guestSurname": "Novak",
+      "email": "isabelle.novak@example.com",
+      "mobile": "+61 412 000 007",
+      "phone": ""
+    }
+  ],
+
+  "reservations": [
+    {
+      "id": 5001,
+      "areaId": 10,
+      "areaName": "101",
+      "categoryName": "Standard King",
+      "arrivalDate": "NOW-1d",
+      "departureDate": "NOW+2d",
+      "guestId": 9001,
+      "status": "arrived",
+      "propertyId": 1,
+      "adults": 2,
+      "children": 0
+    },
+    {
+      "id": 5002,
+      "areaId": 11,
+      "areaName": "Room 102",
+      "categoryName": "Standard Twin",
+      "arrivalDate": "NOW+2h",
+      "departureDate": "NOW+3d",
+      "guestId": 9002,
+      "status": "confirmed",
+      "propertyId": 1,
+      "adults": 1,
+      "children": 0
+    },
+    {
+      "id": 5003,
+      "areaId": 12,
+      "areaName": "Villa 7",
+      "categoryName": "Villa",
+      "arrivalDate": "NOW-6d",
+      "departureDate": "NOW-3d",
+      "guestId": 9003,
+      "status": "arrived",
+      "propertyId": 1,
+      "adults": 2,
+      "children": 1
+    },
+    {
+      "id": 5004,
+      "areaId": 13,
+      "areaName": "203",
+      "categoryName": "Deluxe Queen",
+      "arrivalDate": "NOW+10d",
+      "departureDate": "NOW+13d",
+      "guestId": 9004,
+      "status": "confirmed",
+      "propertyId": 1,
+      "adults": 2,
+      "children": 0
+    },
+    {
+      "id": 5005,
+      "areaId": 10,
+      "areaName": "101",
+      "categoryName": "Standard King",
+      "arrivalDate": "NOW+20d",
+      "departureDate": "NOW+22d",
+      "guestId": 9005,
+      "status": "cancelled",
+      "propertyId": 1,
+      "adults": 2,
+      "children": 0
+    },
+    {
+      "id": 5006,
+      "areaId": 12,
+      "areaName": "Villa 7",
+      "categoryName": "Villa",
+      "arrivalDate": "NOW-2h",
+      "departureDate": "NOW+4d",
+      "guestId": 9006,
+      "status": "confirmed",
+      "propertyId": 1,
+      "adults": 3,
+      "children": 1
+    },
+    {
+      "id": 5007,
+      "areaId": 13,
+      "areaName": "203",
+      "categoryName": "Deluxe Queen",
+      "arrivalDate": "NOW-5d",
+      "departureDate": "NOW-26h",
+      "guestId": 9007,
+      "status": "departed",
+      "propertyId": 1,
+      "adults": 1,
+      "children": 0
+    }
+  ]
+}

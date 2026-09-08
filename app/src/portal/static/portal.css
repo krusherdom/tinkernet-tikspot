@@ -16,7 +16,8 @@
 .cp-card {
   width: 100%;
   max-width: var(--cp-w, 420px);
-  background: #fff;
+  background: var(--cp-card-bg, #fff);
+  color: var(--cp-text, #16202B);
   border-radius: 18px;
   padding: 28px 26px 24px;
   box-shadow: 0 24px 60px rgb(0 0 0 / 0.35);
@@ -25,10 +26,19 @@
   gap: 2px;
 }
 
+/* A block wrapper carrying the per-block style knobs (mt/mb/color/bg/align).
+   Transparent by default so it adds nothing when no style is set. */
+.cp-block { }
+/* Hidden blocks stay in the editor preview (dimmed, so they're still
+   selectable) but are never emitted at all on the live page. */
+.cp-block--hidden { opacity: 0.35; outline: 1px dashed currentColor; outline-offset: 2px; }
+
 /* logo / image */
 .cp-logo { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 4px 0 14px; }
 .cp-logo img { max-width: 100%; height: auto; display: block; }
 .cp-logo__txt { font-weight: 800; font-size: 15px; letter-spacing: 0.04em; color: #1761B0; text-transform: uppercase; }
+/* theme.logoPosition = 'left' */
+.cp-logo-left .cp-logo { flex-direction: row; align-items: center; justify-content: flex-start; }
 
 /* text blocks */
 .cp-heading { font-size: var(--cp-hsize, 24px); font-weight: 700; color: #16202B; margin: 2px 0 12px; line-height: 1.2; }
@@ -60,6 +70,31 @@
 }
 .cp-btn:hover { filter: brightness(1.06); }
 .cp-btn-disabled { opacity: 0.55; cursor: default; }
+.cp-btn--outline { background: transparent; border: 2px solid var(--cp-accent, #2F8CEE); color: var(--cp-accent, #2F8CEE); }
+.cp-btn--pill { border-radius: 999px; }
+/* theme.buttonStyle: applies to plain .cp-btn (login/logout submits) that
+   don't already carry their own explicit style modifier (button-link). */
+.cp-card[data-btn-style="outline"] .cp-btn:not(.cp-btn--solid):not(.cp-btn--outline) {
+  background: transparent; border: 2px solid var(--cp-accent, #2F8CEE); color: var(--cp-accent, #2F8CEE);
+}
+.cp-card[data-btn-style="pill"] .cp-btn { border-radius: 999px; }
+a.cp-btn { display: block; text-align: center; text-decoration: none; box-sizing: border-box; }
+
+/* button-link / divider / html / terms / columns */
+.cp-divider { border: none; border-top: 1px solid #E3E8EF; margin: 14px 0; }
+.cp-terms {
+  display: flex; align-items: flex-start; gap: 8px; font-size: 13px; color: #5A6976;
+  line-height: 1.4; margin: 0 0 12px; cursor: pointer;
+}
+.cp-terms input { margin-top: 2px; flex: none; }
+.cp-terms a { color: var(--cp-accent, #2F8CEE); font-weight: 600; text-decoration: none; }
+.cp-html { font-size: 14px; color: inherit; line-height: 1.55; margin: 0 0 12px; }
+.cp-html img { max-width: 100%; height: auto; }
+.cp-cols { display: flex; gap: 16px; align-items: flex-start; }
+.cp-cols .cp-col { flex: 1 1 0; min-width: 0; }
+@media (max-width: 560px) {
+  .cp-cols { flex-direction: column; }
+}
 
 /* banners */
 .cp-error { background: #FDECEC; color: #B3261E; border: 1px solid #F5C2C0; border-radius: 10px;
@@ -67,5 +102,13 @@
 .cp-notice { background: #FFF7E6; color: #7A4F01; border: 1px solid #F3D68A; border-radius: 10px;
   padding: 12px 14px; font-size: 13px; margin: 0 0 16px; text-align: center; line-height: 1.5; }
 .cp-notice a { display: inline-block; margin-top: 6px; color: #1761B0; font-weight: 700; text-decoration: none; }
+/* Announcement severities. Tinted panels, not shouty fills — they sit on the
+   light card above the login form and must stay easy to read. */
+.cp-notice--info { background: #EAF3FE; color: #14507F; border-color: #BBD9F5; }
+.cp-notice--success { background: #EBF7EE; color: #1D6335; border-color: #B9E3C6; }
+.cp-notice--warning { background: #FFF7E6; color: #7A4F01; border-color: #F3D68A; }
+.cp-notice--danger { background: #FDECEC; color: #98231F; border-color: #F5C2C0; }
+.cp-notice[class*="cp-notice--"] strong { display: block; margin-bottom: 2px; font-weight: 700; }
+.cp-notice--info a, .cp-notice--success a, .cp-notice--warning a, .cp-notice--danger a { color: inherit; }
 .cp-notice.flash { animation: cp-flash .9s ease; }
 @keyframes cp-flash { 0%,100% { box-shadow: 0 0 0 0 rgb(245 181 68 / 0) } 30% { box-shadow: 0 0 0 4px rgb(245 181 68 / 0.5) } }

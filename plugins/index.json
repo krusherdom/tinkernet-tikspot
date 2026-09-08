@@ -1,0 +1,108 @@
+{
+  "format": "tikspot-plugin-catalog",
+  "version": 1,
+  "updated": "2026-09-08",
+  "plugins": [
+    {
+      "id": "demo-hotel-json",
+      "name": "Hotel Guest System (JSON, token auth)",
+      "description": "Demo hotel guest system over JSON with a username/password token login. Matches room number + guest name; stay window from checkIn/checkOut.",
+      "author": "Tikspot",
+      "file": "demo-hotel-json.json",
+      "tags": [
+        "demo",
+        "hotel",
+        "json",
+        "token-auth"
+      ],
+      "requires": "examples/guest-api demo server (edit the URL to your host)",
+      "parser": "json",
+      "inputs": [
+        "room",
+        "name"
+      ]
+    },
+    {
+      "id": "demo-hotel-xml",
+      "name": "Hotel Guest System (XML, API key)",
+      "description": "Same demo guest system, XML response with an X-Api-Key header. Shows the XML parser and attribute/element paths.",
+      "author": "Tikspot",
+      "file": "demo-hotel-xml.json",
+      "tags": [
+        "demo",
+        "hotel",
+        "xml",
+        "api-key"
+      ],
+      "requires": "examples/guest-api demo server (edit the URL to your host)",
+      "parser": "xml",
+      "inputs": [
+        "room",
+        "name"
+      ]
+    },
+    {
+      "id": "demo-hotel-regex",
+      "name": "Hotel Guest System (plain text, API key)",
+      "description": "Same demo guest system, plain-text response parsed with a named-group regex (one record per line).",
+      "author": "Tikspot",
+      "file": "demo-hotel-regex.json",
+      "tags": [
+        "demo",
+        "hotel",
+        "regex",
+        "text"
+      ],
+      "requires": "examples/guest-api demo server (edit the URL to your host)",
+      "parser": "regex",
+      "inputs": [
+        "room",
+        "name"
+      ]
+    },
+    {
+      "id": "rms-cloud-surname-room",
+      "name": "RMS Cloud — surname + room",
+      "description": "RMS Hospitality Cloud (rmscloud.com) via its REST API. Logs in with agent + client credentials, searches reservations by room and surname, and windows on arrival/departure.",
+      "author": "Tikspot",
+      "file": "rms-cloud-surname-room.json",
+      "tags": [
+        "rms-cloud",
+        "hotel",
+        "pms",
+        "json",
+        "token-auth"
+      ],
+      "requires": "RMS Cloud API access: agent ID + agent password (from RMS), and a client ID + \"Web Service password\" (from the property). See docs/plugins/rms-cloud.md.",
+      "parser": "json",
+      "inputs": [
+        "room",
+        "name"
+      ]
+    },
+    {
+      "id": "rms-cloud-any-detail",
+      "name": "RMS Cloud — room + any guest detail",
+      "description": "RMS Hospitality Cloud, room number plus any one of last name / first name / email / mobile. Two-step lookup: searches reservations by room, then fetches each guest record to fill in contact details.",
+      "author": "Tikspot",
+      "file": "rms-cloud-any-detail.json",
+      "tags": [
+        "rms-cloud",
+        "hotel",
+        "pms",
+        "json",
+        "token-auth",
+        "multi-step"
+      ],
+      "requires": "RMS Cloud API access: agent ID + agent password (from RMS), and a client ID + \"Web Service password\" (from the property). See docs/plugins/rms-cloud.md.",
+      "parser": "json",
+      "inputs": [
+        "room",
+        "last_name",
+        "first_name",
+        "email",
+        "mobile"
+      ]
+    }
+  ]
+}

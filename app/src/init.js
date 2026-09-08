@@ -6,7 +6,8 @@ import fs from 'node:fs';
 import { openDb } from './db/index.js';
 import { migrate } from './db/migrate.js';
 import { seedDefaults } from './seed.js';
-import { ensureDefaultDesign } from './portal/designs.js';
+import { ensureDefaultDesign, activeModel } from './portal/designs.js';
+import { syncFreeCredentials } from './design/credentials.js';
 import { promoteStagedRestore } from './admin/backup.js';
 import { ensureNasSecret } from './radius/nas.js';
 import { writeClientsConf } from './radius/clientsconf.js';
@@ -21,6 +22,11 @@ function main() {
     migrate(db);
     seedDefaults(db);
     ensureDefaultDesign(db);
+    // Guards the restore-of-redacted-backup gap: a redacted backup strips
+    // free_credentials, but the active design may still reference non-"free"
+    // plans via free-login blocks — re-derive/re-sync those RADIUS users now,
+    // before radiusd starts, rather than waiting on a design re-publish.
+    syncFreeCredentials(db, activeModel(db));
     // Trust the router (and LAN NAS clients) in FreeRADIUS using the shared secret,
     // before radiusd starts. Without this, stock config only trusts localhost and
     // the router's requests are dropped as "unknown client".

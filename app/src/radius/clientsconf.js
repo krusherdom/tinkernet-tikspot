@@ -12,7 +12,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { ensureNasSecret } from './nas.js';
 
 const RADDB_DIR = process.env.TIKSPOT_RADDB_DIR ?? '/etc/raddb';
@@ -45,19 +45,46 @@ export function writeClientsConf(secret) {
   return true;
 }
 
+// Run one command with a hard timeout, resolving to its exit code (or null when
+// the binary is missing / it timed out). Async on purpose: spawnSync blocked the
+// event loop for up to 5s on every secret save, stalling every other request.
+// A missing binary surfaces as an 'error' EVENT, not a throw — handle both.
+export function runOnce(bin, args, timeoutMs = 5000) {
+  return new Promise((resolve) => {
+    let child;
+    let done = false;
+    const finish = (code) => {
+      if (done) return;
+      done = true;
+      resolve(code);
+    };
+    try {
+      child = spawn(bin, args, { stdio: 'ignore', timeout: timeoutMs });
+    } catch {
+      finish(null);
+      return;
+    }
+    child.on('error', () => finish(null));
+    child.on('exit', (code) => finish(code));
+    // Belt and braces: spawn's own `timeout` kills the child, but if it never
+    // starts we still want to give up.
+    const t = setTimeout(() => {
+      try { child.kill(); } catch { /* already gone */ }
+      finish(null);
+    }, timeoutMs + 500);
+    if (typeof t.unref === 'function') t.unref();
+  });
+}
+
 // Restart radiusd so a freshly-written clients.conf takes effect. FreeRADIUS does
 // NOT reload client/secret definitions on SIGHUP, so we bounce the supervised
 // longrun: SIGTERM, which the s6 supervisor follows by restarting it (the wanted
-// state stays "up"). No-op where s6 isn't present (dev/test). Returns true on a
+// state stays "up"). No-op where s6 isn't present (dev/test). Resolves true on a
 // clean signal.
-export function reloadRadiusd() {
+export async function reloadRadiusd() {
   for (const bin of ['/command/s6-svc', 's6-svc']) {
-    try {
-      const r = spawnSync(bin, ['-t', '/run/service/radiusd'], { timeout: 5000 });
-      if (r.status === 0) return true;
-    } catch {
-      /* try the next candidate path */
-    }
+    const code = await runOnce(bin, ['-t', '/run/service/radiusd'], 5000);
+    if (code === 0) return true;
   }
   return false;
 }
@@ -66,8 +93,11 @@ export function reloadRadiusd() {
 // secret set/changed at runtime (e.g. via the setup wizard or Auto-configure)
 // takes effect live — keeping the container's accepted secret in lock-step with
 // what the router was told, without needing a container restart.
-export function applyNasSecret(db) {
+//
+// `wrote:false` just means there is no raddb tree (plain dev/test) — only
+// `wrote && !reloaded` is a real problem worth warning the operator about.
+export async function applyNasSecret(db) {
   const wrote = writeClientsConf(ensureNasSecret(db));
-  const reloaded = wrote ? reloadRadiusd() : false;
-  return { wrote, reloaded };
+  const reloaded = wrote ? await reloadRadiusd() : false;
+  return { wrote, reloaded, degraded: wrote && !reloaded };
 }

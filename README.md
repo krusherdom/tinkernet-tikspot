@@ -63,15 +63,25 @@ RADIUS tables, and FreeRADIUS remains the single auth authority.
 
 ## Features
 
-- **Three login types** per portal: one-tap **free** login, **voucher** codes, and named
-  **user accounts** — mix and match on the page.
+- **Four login types** per portal: one-tap **free** login, **voucher** codes, named
+  **user accounts**, and **guest lookup** — verify guests against your own system (hotel
+  PMS, membership API…) via admin-authored recipes (JSON / XML / regex parsing, token
+  auth, stay-window checks). See `docs/guest-lookup-plugins.md` and the demo API in
+  `examples/guest-api/`.
 - **Plans** = MikroTik limits (rate `5M/5M`, data cap, session time). New: **"expire at
   midnight"** plans that renew daily (sessions are CoA-disconnected at the router's local
   midnight for a fresh quota) instead of a fixed time limit.
 - **Voucher batches** with optional date-validity windows; printable voucher sheets.
 - **MAC re-auth** ("remember device") so returning guests reconnect automatically.
-- **Live page designer** — drag-and-drop blocks (logo, heading, text, login widgets) with
-  a full **colour picker** (presets + native picker + hex) for background, glow and accent.
+- **Live page designer** — registry-driven blocks (logo, heading, text, columns, link
+  buttons, terms checkbox, sanitised HTML, all login widgets), per-block styling, themes
+  with background images, **drafts / publish / version history**, templates, multiple
+  designs, and themed connected / logged-out pages. The canvas is the real server render.
+- **Announcements & settings** — banners on the portal and admin with severity and time
+  windows; a registry-driven Settings tab (portal texts, login method, log retention…).
+- **Logs & reports** — bounded by a daily retention sweep, an app event log, CSV export,
+  and a reports view (logins per day, usage per plan, top users). Help tab with a setup
+  checklist and troubleshooting table.
 - **Guided setup wizard** that probes the router and **auto-configures** the RADIUS client,
   hotspot profile, DNS static and walled-garden — every object it creates is tagged with a
   managed comment and can be **queried back / verified** from the admin (per-component
@@ -99,9 +109,11 @@ RADIUS tables, and FreeRADIUS remains the single auth authority.
 | `app/src/radius/` | RADIUS projection (`sync`), CoA (`coa`), NAS secret (`nas`), `clients.conf` rendering, midnight-expiry sweeper |
 | `app/src/portal/` | Captive-portal rendering + the served `/m/portal.js` client |
 | `app/src/mikrotik/` | RouterOS v7 REST client (auto-configure, verify, managed-object listing) |
-| `app/src/{db,design,mac,voucher,hotspot}/` | Schema/migrations, design model, MAC re-auth, voucher sweeper, hotspot shim generator |
+| `app/src/{db,design,mac,voucher,hotspot}/` | Schema/migrations, design model + block registry + templates, MAC re-auth, voucher sweeper, hotspot shim generator |
+| `app/src/plugins/` | Guest-lookup engine (recipe schema, templating, JSON/XML/regex parsers, matching, HTTP client, grants) |
 | `app/public/admin/` | Vanilla-JS admin SPA + the captive-portal page designer |
-| `app/test/` | `node --test` unit tests (auth hashing, validators, rate limiter, clients.conf, local-date) |
+| `app/test/` | `node --test` suites: pure unit tests, in-memory SQLite tests, route tests via `app.inject`, plugin engine + demo-API integration |
+| `examples/guest-api/` | Zero-dependency demo guest API + three ready recipes for trying guest lookup |
 | `docker/` | Multi-stage, multi-arch Dockerfile + s6 service tree (`00-init`, `db-init`, `radiusd`, `node`) |
 | `docs/` | Setup & deployment guides (see below) |
 | `deploy/` | `tikspot.app.yml` — RouterOS 7.22+ container **App** manifest (self-provisions networking) |
@@ -125,7 +137,24 @@ cd app && npm test      # node --test
 
 **Releases:** pushing a `v*` tag (e.g. `git tag v0.10.0 && git push origin v0.10.0`) runs the
 release workflow, which builds the multi-arch image and publishes it to
-`ghcr.io/omegatron/tinkernet-tikspot` for the RouterOS App deploy below.
+`ghcr.io/krusherdom/tinkernet-tikspot` for the RouterOS App deploy below.
+
+## Plugins
+
+Guest-lookup **plugins** are portable JSON recipes that let guests log in with details
+your own system already holds (room + surname, booking reference, mobile, email…). The
+[`plugins/`](plugins/) folder is the community catalog: the admin's **Guest lookup →
+Browse catalog** reads its `index.json` and imports a recipe in one click (disabled and
+without secrets until you review it). Point *Settings → Plugin catalog URL* at any
+GitHub folder, `index.json` or single exported file to use your own catalog.
+
+- How recipes work: [`docs/guest-lookup-plugins.md`](docs/guest-lookup-plugins.md), field
+  reference [`docs/plugins/README.md`](docs/plugins/README.md)
+- Try it with the bundled demo guest API: [`examples/guest-api/`](examples/guest-api/)
+- **RMS Cloud** PMS integration, two ready-made recipes:
+  [`docs/plugins/rms-cloud.md`](docs/plugins/rms-cloud.md) (mock server:
+  [`examples/rms-mock/`](examples/rms-mock/))
+- Contribute one: [`plugins/README.md`](plugins/README.md)
 
 ## Deploying to a MikroTik
 
@@ -133,7 +162,7 @@ Two paths, depending on RouterOS version:
 
 1. **RouterOS 7.22+ — container "App"** *(simplest; auto-provisions the network)*: add
    [`deploy/tikspot.app.yml`](deploy/tikspot.app.yml) with `/app add network=lan` and the
-   router pulls the public multi-arch image (`ghcr.io/omegatron/tinkernet-tikspot`,
+   router pulls the public multi-arch image (`ghcr.io/krusherdom/tinkernet-tikspot`,
    published on each release tag) and creates the veth, bridge port, IP and NAT for you.
    See [`docs/deploy-app.md`](docs/deploy-app.md).
 2. **File-based** *(any RouterOS 7 with the `container` package)*: build the arm64 tar,
@@ -187,7 +216,7 @@ agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Reporting issues & security
 
-- **Bugs / features:** open a [GitHub issue](https://github.com/omegatron/tinkernet-tikspot/issues/new/choose)
+- **Bugs / features:** open a [GitHub issue](https://github.com/krusherdom/tinkernet-tikspot/issues/new/choose)
   using the bug-report or feature-request template.
 - **Security vulnerabilities:** please **don't** file a public issue — report privately via the
   repo's **Security → Report a vulnerability** tab. See [`SECURITY.md`](SECURITY.md).
