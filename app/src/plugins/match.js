@@ -11,7 +11,8 @@ export function normalize(value, mode) {
         .normalize('NFD')
         .replace(/[̀-ͯ]/g, '') // strip diacritics
         .toLowerCase()
-        .replace(/[^\p{L}\p{N}\s]/gu, '') // strip punctuation
+        .replace(/[-‐‑‒–—_/]/g, ' ') // hyphens, dashes, slashes act as word breaks
+        .replace(/[^\p{L}\p{N}\s]/gu, '') // strip remaining punctuation (apostrophes, commas, dots)
         .replace(/\s+/g, ' ')
         .trim();
     case 'phone':
@@ -56,7 +57,16 @@ function valuesMatch(inputVal, recordVal, mode) {
     if (a.length >= 9 && b.length >= 9) return a.slice(-9) === b.slice(-9);
     return a === b;
   }
-  return normalize(inputVal, mode) === normalize(recordVal, mode);
+  const a = normalize(inputVal, mode);
+  const b = normalize(recordVal, mode);
+  if (a === b) return true;
+  if (mode === 'name') {
+    // Word breaks are optional: "smith jones", "Smith-Jones" and "smithjones"
+    // all refer to the same guest.
+    const squash = (v) => v.replace(/\s+/g, '');
+    return !!a && squash(a) === squash(b);
+  }
+  return false;
 }
 
 function evalRule(rule, record, inputs) {

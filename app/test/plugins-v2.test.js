@@ -595,3 +595,12 @@ test('declared param defaults are coerced by type', () => {
   assert.equal(v.value.params.n.default, 7);
   assert.equal(v.value.paramValues.t, false);
 });
+
+test('name matching treats hyphens and word breaks as optional', () => {
+  const spec = { all: true, rules: [{ input: 'name', field: 'lastName', normalize: 'name' }] };
+  const inp = (v) => [{ name: 'name', required: true, value: v }];
+  assert.equal(matchRecord(spec, { lastName: 'Smith-Jones' }, inp('smith jones')), true);
+  assert.equal(matchRecord(spec, { lastName: 'Smith-Jones' }, inp('smithjones')), true);
+  assert.equal(matchRecord(spec, { lastName: "O'Brien" }, inp('obrien')), true);
+  assert.equal(matchRecord(spec, { lastName: 'Smith-Jones' }, inp('smith')), false);
+});

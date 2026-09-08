@@ -278,7 +278,7 @@ Each rule: `{ input, field | anyOf: [...], normalize }`.
   | Normalizer | Behaviour |
   |---|---|
   | `trim` (default) | trims whitespace only |
-  | `name` | case/diacritic/punctuation-insensitive (`José O'Brien` ≈ `jose obrien`) |
+  | `name` | case/diacritic/punctuation-insensitive; hyphens, dashes and slashes count as optional word breaks (`José O'Brien` ≈ `jose obrien`, `Smith-Jones` ≈ `smith jones` ≈ `smithjones`) |
   | `phone` | digits only, compares the **last 9 digits** if both sides have ≥ 9 (tolerates country-code/leading-zero differences) |
   | `digits` | digits only, exact match |
   | `email` | trimmed + lower-cased |

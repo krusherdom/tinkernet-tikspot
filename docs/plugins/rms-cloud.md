@@ -60,10 +60,12 @@ only in what they ask the guest for and how many API calls they make.
 ### RMS Cloud — surname + room (`rms-cloud-surname-room.json`)
 
 Asks for **room / site number** and **last name**, both required. One request:
-`POST /reservations/search` filtered by `guestSurname` and `areaNameLike`, restricted to
-`arrived`/`confirmed` reservations. Matches room (digits-only) **and** surname
-(case/diacritic-insensitive) — `minRules: 2` means both must actually match, not just be
-present.
+`POST /reservations/search` filtered by `areaNameLike` only, restricted to
+`arrived`/`confirmed` reservations. The surname is deliberately **not** sent to RMS: RMS's
+own surname filter is undocumented for case, hyphens and apostrophes, so Tikspot fetches
+every current reservation in that room and compares the surname itself
+(case/diacritic-insensitive, and `Smith-Jones`, `smith jones` and `smithjones` all match).
+`minRules: 2` means room **and** surname must actually match, not just be present.
 
 ### RMS Cloud — room + any guest detail (`rms-cloud-any-detail.json`)
 
