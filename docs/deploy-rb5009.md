@@ -141,14 +141,25 @@ port), publish it:
    - Scheme `https` (needs `www-ssl` enabled) or `http` (needs `www` enabled):
      `/ip/service/enable www-ssl`
    - Router host `192.168.88.1`, an API user + password.
-   - Container IP `172.18.0.3`, Hotspot server-name (e.g. `hotspot.tikspot`), a RADIUS
-     secret (match step 3 if you set one).
+   - Container IP `172.18.0.3`, Hotspot server-name (e.g. `hotspot.tikspot` — not
+     `.local`, that TLD is reserved for mDNS and phones won't resolve it through the
+     router), a RADIUS secret (match step 3 if you set one).
    - **Test connection**, then **Auto-configure** — adds the RADIUS client → the
-     container, sets each hotspot profile to `use-radius` + `login-by=mac-cookie,
-     http-chap,http-pap,mac`, adds the DNS static for the server-name, and walled-gardens
-     the container.
+     container, enables RADIUS CoA (`/radius incoming set accept=yes port=3799`, needed
+     for the admin "Kick" button to actually work), sets each hotspot profile to
+     `use-radius` + `login-by=mac-cookie,http-chap,http-pap,mac`, adds the DNS static
+     for the server-name, and walled-gardens the container.
+   - **Not covered by Auto-configure:** the srcnat masquerade for the container's
+     outbound internet (guest-lookup plugins, the System page's egress check) — add it
+     once, manually:
+     ```rsc
+     /ip/firewall/nat/add chain=srcnat action=masquerade src-address=172.18.0.0/24
+     ```
 3. Open the **Portal editor**, design the page, **Save & publish**, then **Download
    hotspot files** and upload them into the router's hotspot directory.
+
+Full detail on what each of the above does and how the wizard's **Verify** step checks
+it lives in [setup-mikrotik.md §9](setup-mikrotik.md#verify-checks-reference).
 
 ## Updating later
 

@@ -1,0 +1,58 @@
+{
+  "name": "Hotel Guest System (JSON, token auth)",
+  "enabled": true,
+  "planGroup": "free",
+  "timeoutMs": 8000,
+  "allowInsecureTls": false,
+  "maxRecords": 200,
+  "auth": {
+    "method": "POST",
+    "url": "http://192.168.1.10:8090/auth/token",
+    "headers": { "Content-Type": "application/json" },
+    "contentType": "json",
+    "bodyTemplate": "{\"username\":\"{{secret.username}}\",\"password\":\"{{secret.password}}\"}",
+    "tokenPath": "token",
+    "tokenTtlSecs": 3600,
+    "placement": { "in": "header", "name": "Authorization", "prefix": "Bearer " }
+  },
+  "request": {
+    "method": "GET",
+    "url": "http://192.168.1.10:8090/guests?room={{input.room}}",
+    "headers": {},
+    "contentType": "json",
+    "accept": "json"
+  },
+  "parse": {
+    "type": "json",
+    "root": "guests",
+    "fields": {
+      "firstName": "firstName",
+      "lastName": "lastName",
+      "room": "room",
+      "mobile": "mobile",
+      "email": "email",
+      "bookingRef": "bookingRef",
+      "checkIn": "checkIn",
+      "checkOut": "checkOut"
+    },
+    "dateFormat": "iso"
+  },
+  "match": {
+    "all": true,
+    "rules": [
+      { "input": "room", "field": "room", "normalize": "trim" },
+      { "input": "name", "anyOf": ["firstName", "lastName"], "normalize": "name" }
+    ]
+  },
+  "window": { "start": "checkIn", "end": "checkOut", "leewayHours": 24, "maxGrantHours": 168 },
+  "inputs": [
+    { "name": "room", "label": "Room number", "type": "text", "required": true, "placeholder": "e.g. 101" },
+    { "name": "name", "label": "Last name (or first name)", "type": "text", "required": true, "placeholder": "Smith" }
+  ],
+  "messages": {
+    "noMatch": "We could not find a booking with those details.",
+    "outsideWindow": "Your stay is not active yet, or has ended.",
+    "upstream": "The guest system is not responding — please try again or ask at reception."
+  },
+  "secrets": { "username": "frontdesk", "password": "letmein", "apiKey": "" }
+}

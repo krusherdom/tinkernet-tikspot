@@ -7,7 +7,7 @@ import fs from 'node:fs';
 const radiusSchema = fs.readFileSync(new URL('./schema-radius.sql', import.meta.url), 'utf8');
 const appSchema = fs.readFileSync(new URL('./schema-app.sql', import.meta.url), 'utf8');
 
-const SCHEMA_VERSION = '4';
+const SCHEMA_VERSION = '7';
 
 // Add a column to a table only if it's missing (CREATE IF NOT EXISTS won't add
 // columns to a pre-existing table).
@@ -25,6 +25,7 @@ export function migrate(db) {
   addColumnIfMissing(db, 'vouchers', 'valid_from', 'TEXT');
   addColumnIfMissing(db, 'vouchers', 'valid_until', 'TEXT');
   addColumnIfMissing(db, 'plans', 'expiry_mode', 'TEXT');
+  addColumnIfMissing(db, 'designs', 'draft_json', 'TEXT');
   db.prepare(
     `INSERT INTO app_meta (key, value) VALUES ('schema_version', @v)
      ON CONFLICT(key) DO UPDATE SET value = excluded.value`,

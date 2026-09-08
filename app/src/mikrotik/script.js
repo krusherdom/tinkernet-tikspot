@@ -3,7 +3,7 @@
 // router terminal instead of giving the container write credentials. Every object is
 // keyed by the managed comment, so the script is safe to re-run (set-or-add).
 
-import { MANAGED_COMMENT, isIpHost } from './rest.js';
+import { MANAGED_COMMENT, isIpHost, COA_PORT } from './rest.js';
 
 // Quote + escape a value for a RouterOS string argument.
 function q(v) {
@@ -45,6 +45,11 @@ export function buildSetupScript({ containerIp, serverHost, nasSecret }) {
     `address=${q(ip)} secret=${q(nasSecret)} service=hotspot comment=${q(cmt)}`,
   );
   s += '\n';
+
+  // CoA / Disconnect-Request listener — without this the router ignores "Kick".
+  s += '# Accept RADIUS CoA / Disconnect-Requests (needed for admin "Kick"):\n';
+  s += `/radius incoming set accept=yes port=${COA_PORT}\n`;
+  s += ':put "Tikspot RADIUS incoming: accept=yes"\n\n';
 
   // Every hotspot profile -> use RADIUS (mirrors autoConfigure, which patches all).
   s += '# Point every hotspot profile at RADIUS:\n';

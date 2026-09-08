@@ -19,7 +19,15 @@ import {
 import { renderClientsConf } from '../src/radius/clientsconf.js';
 import { routerLocalDate } from '../src/radius/midnight.js';
 import { buildSetupScript } from '../src/mikrotik/script.js';
-import { MANAGED_COMMENT } from '../src/mikrotik/rest.js';
+import { MANAGED_COMMENT, verifyConfig, autoConfigure } from '../src/mikrotik/rest.js';
+import {
+  validateIPv4,
+  validateScheme,
+  validateHost,
+  validateServerName,
+  validateSecret,
+  validateRouterSettings,
+} from '../src/admin/validate.js';
 
 test('password hash round-trips and rejects wrong/tampered input', () => {
   const stored = hashPassword('correct horse');
@@ -123,6 +131,8 @@ test('buildSetupScript emits idempotent hotspot config with embedded values (IP 
   assert.ok(s.includes(MANAGED_COMMENT)); // tagged with the managed comment
   assert.match(s, /\/ip\/hotspot\/profile set \[find\] use-radius=yes/);
   assert.match(s, /walled-garden\/ip add action=accept dst-address="172\.18\.0\.3"/);
+  // CoA / kick support — without this "Kick" silently does nothing.
+  assert.ok(s.includes('/radius incoming set accept=yes port=3799'));
   // A literal-IP server-name needs no DNS static / host walled-garden.
   assert.ok(!s.includes('/ip/dns/static add'));
   assert.match(s, /server-name is an IP/);
@@ -143,4 +153,206 @@ test('renderClientsConf embeds the secret and trusts localhost + a LAN range', (
   // A catch-all client so a router at any LAN IP is accepted (the gap this fixes).
   assert.match(conf, /ipaddr = 0\.0\.0\.0\/0/);
   assert.match(conf, /ipv6addr = ::\/0/);
+});
+
+// ---------------------------------------------------------------------------
+// Router-settings validators (POST /api/setup/router).
+
+test('validateIPv4 accepts dotted-quad and rejects junk, empty is ok', () => {
+  assert.deepEqual(validateIPv4(''), { ok: true, value: '' });
+  assert.deepEqual(validateIPv4(null), { ok: true, value: '' });
+  assert.equal(validateIPv4('172.18.0.3').ok, true);
+  assert.equal(validateIPv4('172.18.0.3').value, '172.18.0.3');
+  assert.equal(validateIPv4('256.1.1.1').ok, false);
+  assert.equal(validateIPv4('not-an-ip').ok, false);
+  assert.equal(validateIPv4('1.2.3').ok, false);
+});
+
+test('validateScheme accepts http/https, defaults to https, rejects other', () => {
+  assert.deepEqual(validateScheme(''), { ok: true, value: 'https' });
+  assert.deepEqual(validateScheme(null), { ok: true, value: 'https' });
+  assert.equal(validateScheme('http').value, 'http');
+  assert.equal(validateScheme('HTTPS').value, 'https');
+  assert.equal(validateScheme('ftp').ok, false);
+});
+
+test('validateHost accepts host[:port] forms and rejects scheme/path/spaces', () => {
+  assert.deepEqual(validateHost(''), { ok: true, value: '' });
+  assert.equal(validateHost('192.168.88.1').ok, true);
+  assert.equal(validateHost('router.lan:8443').ok, true);
+  assert.equal(validateHost('router.lan:70000').ok, false); // bad port
+  assert.equal(validateHost('https://router.lan').ok, false); // scheme not allowed
+  assert.equal(validateHost('router.lan/path').ok, false); // no path
+  assert.equal(validateHost('router lan').ok, false); // no spaces
+  assert.equal(validateHost('not a host', 'host').error.includes('host'), true);
+});
+
+test('validateServerName rejects .local and enforces host|label shape', () => {
+  assert.deepEqual(validateServerName(''), { ok: true, value: '' });
+  assert.equal(validateServerName('hotspot.tikspot').ok, true);
+  assert.equal(validateServerName('hotspot.tikspot|Guest Wifi').ok, true);
+  assert.equal(validateServerName('172.18.0.3').ok, true);
+  assert.equal(validateServerName('hotspot.local').ok, false);
+  assert.match(validateServerName('hotspot.local').error, /mDNS|Bonjour/);
+  assert.equal(validateServerName('HOTSPOT.LOCAL').ok, false); // case-insensitive
+  assert.equal(validateServerName('|label only').ok, false); // no host part
+  assert.equal(validateServerName('bad host|label').ok, false); // space in host part
+});
+
+test('validateSecret enforces minimum length and rejects spaces, empty is a no-op', () => {
+  assert.deepEqual(validateSecret(''), { ok: true, value: '' });
+  assert.equal(validateSecret('short').ok, false);
+  assert.equal(validateSecret('longenoughsecret').ok, true);
+  assert.equal(validateSecret('has a space here').ok, false);
+});
+
+test('validateRouterSettings validates only the fields present and reports per-field errors', () => {
+  const good = validateRouterSettings({
+    scheme: 'https', host: '192.168.88.1', container_ip: '172.18.0.3',
+    server_name: 'hotspot.tikspot', nas_secret: 'a-real-secret-value',
+  });
+  assert.equal(good.ok, true);
+  assert.deepEqual(Object.keys(good.values).sort(), ['container_ip', 'host', 'nas_secret', 'scheme', 'server_name']);
+
+  const bad = validateRouterSettings({ host: '192.168.88.1', server_name: 'hotspot.local', container_ip: '999.1.1.1' });
+  assert.equal(bad.ok, false);
+  assert.ok(bad.fields.server_name);
+  assert.ok(bad.fields.container_ip);
+  assert.equal(bad.fields.host, undefined); // valid field is not reported
+  assert.equal(bad.error, Object.values(bad.fields)[0]);
+
+  // Fields not present in the body are left untouched (partial update).
+  const partial = validateRouterSettings({ host: '192.168.88.1' });
+  assert.equal(partial.ok, true);
+  assert.deepEqual(Object.keys(partial.values), ['host']);
+});
+
+// ---------------------------------------------------------------------------
+// verifyConfig — stub router satisfying only `list` and `call`.
+
+function verifyFixtures({ containerIp, serverHost, radius = 'ok' } = {}) {
+  const fx = {
+    '/radius': radius === 'ok' ? [{ '.id': '*1', address: containerIp, service: 'hotspot', comment: 'x' }] : [],
+    '/radius/incoming': { accept: 'yes', port: '3799' },
+    '/ip/hotspot/profile': [{ '.id': '*2', name: 'default', 'use-radius': 'yes', 'login-by': 'mac-cookie,http-chap,http-pap,mac' }],
+    '/ip/hotspot': [{ '.id': '*3', name: 'hs1', interface: 'bridge1', profile: 'default' }],
+    '/ip/dns/static': [{ '.id': '*4', name: serverHost, address: containerIp }],
+    '/ip/dns': { 'allow-remote-requests': 'yes' },
+    '/ip/hotspot/walled-garden/ip': [{ '.id': '*5', action: 'accept', 'dst-address': containerIp }],
+    '/ip/hotspot/walled-garden': [{ '.id': '*6', action: 'allow', 'dst-host': serverHost }],
+    '/ip/firewall/nat': [{ '.id': '*7', chain: 'srcnat', action: 'masquerade', 'src-address': '10.0.0.0/24' }],
+    '/container': [{ '.id': '*8', name: 'app-tikspot', interface: 'veth1', status: 'running', 'start-on-boot': 'yes' }],
+    '/interface/veth': [{ name: 'veth1', address: `${containerIp}/24`, gateway: '10.0.0.1' }],
+    '/ip/address': [{ address: `${containerIp}/24`, interface: 'veth1' }],
+  };
+  return fx;
+}
+
+test('verifyConfig passes every required check on a fully-configured router', async () => {
+  const containerIp = '10.0.0.5';
+  const serverHost = 'wifi.example.com';
+  const fx = verifyFixtures({ containerIp, serverHost });
+  const router = {
+    list: async (menu) => fx[menu],
+    call: async () => ({ status: 'finished' }),
+  };
+  const result = await verifyConfig(router, { containerIp, serverHost });
+  const failing = result.checks.filter((c) => c.required && c.status !== 'pass');
+  assert.deepEqual(failing, []);
+  assert.equal(result.ok, true);
+});
+
+test('verifyConfig reports drift (missing RADIUS client) as a required failure', async () => {
+  const containerIp = '10.0.0.5';
+  const serverHost = 'wifi.example.com';
+  const fx = verifyFixtures({ containerIp, serverHost, radius: 'missing' });
+  const router = {
+    list: async (menu) => fx[menu],
+    call: async () => ({ status: 'finished' }),
+  };
+  const result = await verifyConfig(router, { containerIp, serverHost });
+  const radiusCheck = result.checks.find((c) => c.component.startsWith('RADIUS client'));
+  assert.equal(radiusCheck.status, 'fail');
+  assert.equal(result.ok, false);
+});
+
+test('verifyConfig reports a read failure as unknown, not a silent fail, and overall ok is false', async () => {
+  const containerIp = '10.0.0.5';
+  const serverHost = 'wifi.example.com';
+  const fx = verifyFixtures({ containerIp, serverHost });
+  const router = {
+    list: async (menu) => {
+      if (menu === '/radius') throw new Error('no permission to read this menu');
+      return fx[menu];
+    },
+    call: async () => ({ status: 'finished' }),
+  };
+  const result = await verifyConfig(router, { containerIp, serverHost });
+  const radiusCheck = result.checks.find((c) => c.component.startsWith('RADIUS client'));
+  assert.equal(radiusCheck.status, 'unknown');
+  assert.equal(result.ok, false); // 'unknown' never counts as a pass
+});
+
+// ---------------------------------------------------------------------------
+// autoConfigure — stub router satisfying only `list`, `add`, `patch`, `call`.
+
+test('autoConfigure records a failed step (403) and keeps going, without marking unreachable', async () => {
+  const containerIp = '10.0.0.5';
+  const router = {
+    list: async (menu) => {
+      if (menu === '/radius') return []; // -> ensureRadiusClient will add()
+      if (menu === '/ip/hotspot/profile') return [{ '.id': '*p1', name: 'default', comment: '' }];
+      return []; // walled-garden reads
+    },
+    add: async () => ({ '.id': '*new' }),
+    patch: async (menu) => {
+      if (menu === '/ip/hotspot/profile') {
+        const err = new Error('not enough permissions');
+        err.status = 403;
+        throw err;
+      }
+      return {};
+    },
+    call: async () => ({}),
+  };
+
+  const result = await autoConfigure(router, {
+    containerIp,
+    nasSecret: 'a-real-secret-value',
+    serverHost: containerIp, // an IP server-name skips the DNS step
+    profiles: null,
+  });
+
+  const byStep = Object.fromEntries(result.steps.map((s) => [s.step, s.status]));
+  assert.equal(byStep['radius-client'], 'done');
+  assert.equal(byStep['radius-incoming'], 'done');
+  assert.equal(byStep['hotspot-profile'], 'failed');
+  assert.equal(byStep['walled-garden'], 'done'); // execution continues past the failed step
+  assert.equal(result.ok, false);
+  assert.ok(!result.unreachable);
+  assert.ok(result.error);
+});
+
+test('autoConfigure marks the router unreachable and skips remaining steps on a status-less error', async () => {
+  const containerIp = '10.0.0.5';
+  const router = {
+    list: async () => {
+      throw new Error('connect ECONNREFUSED'); // no .status => transport-level failure
+    },
+    add: async () => ({ '.id': '*new' }),
+    patch: async () => ({}),
+    call: async () => ({}),
+  };
+
+  const result = await autoConfigure(router, {
+    containerIp,
+    nasSecret: 'a-real-secret-value',
+    serverHost: containerIp,
+    profiles: null,
+  });
+
+  assert.equal(result.steps[0].status, 'failed');
+  assert.ok(result.steps.slice(1).every((s) => s.status === 'skipped'));
+  assert.equal(result.unreachable, true);
+  assert.equal(result.ok, false);
 });

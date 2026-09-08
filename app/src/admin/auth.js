@@ -7,6 +7,8 @@ import { scryptSync, randomBytes, timingSafeEqual } from 'node:crypto';
 import { getSetting, setSetting, getBool } from '../db/settings.js';
 import { VERSION } from '../config.js';
 import { makeRateLimiter, clientIp } from './ratelimit.js';
+import { logAudit } from './audit.js';
+import { logEvent } from './events.js';
 
 const COOKIE = 'tikspot_sess';
 
@@ -66,6 +68,11 @@ function setupComplete(db) {
   return getBool(db, 'setup_complete', false);
 }
 
+// Setup endpoints that stay public no matter what, even after an admin password
+// is set — the wizard needs to read its own state, and (re-)set the admin
+// password, without already holding a session cookie.
+const ALWAYS_PUBLIC_SETUP = new Set(['/api/setup/state', '/api/setup/admin']);
+
 // Paths reachable without auth: the portal, the static admin shell, health,
 // static assets, and the auth/setup endpoints.
 function isPublic(db, req) {
@@ -73,11 +80,25 @@ function isPublic(db, req) {
   const PUBLIC_EXACT = new Set(['/', '/login', '/status', '/logout', '/healthz', '/api.json', '/favicon.ico']);
   if (PUBLIC_EXACT.has(url)) return true;
   if (url.startsWith('/m/') || url.startsWith('/assets/') || url.startsWith('/admin') || url.startsWith('/ds/')) return true;
+  // Guest-lookup plugin lookups (POST /portal/lookup/:id) — public like the
+  // rest of the captive portal; rate-limited separately in portal/routes.js.
+  if (url.startsWith('/portal/')) return true;
   // Individual hotspot shim files — fetched by the router (no cookie) during push.
   if (url.startsWith('/hotspot-files/')) return true;
   if (url.startsWith('/api/auth/')) return true;
-  // Setup endpoints are open only until setup is finished.
-  if (url.startsWith('/api/setup/') && !setupComplete(db)) return true;
+  // The help content is reference material for getting through setup — open it
+  // up only until setup is finished, same as the setup endpoints below.
+  if (url === '/api/help' && !setupComplete(db)) return true;
+  // Setup endpoints are open only until setup is finished, and even then:
+  // /state and /admin always stay open (the wizard needs them to bootstrap),
+  // but once an admin password exists every OTHER /api/setup/* path needs the
+  // session cookie — otherwise an attacker who reaches the container before
+  // "Finish setup" is clicked could re-run Auto-configure or read router
+  // credentials with no auth at all.
+  if (url.startsWith('/api/setup/') && !setupComplete(db)) {
+    if (ALWAYS_PUBLIC_SETUP.has(url)) return true;
+    return !getSetting(db, 'admin_password_hash', null);
+  }
   return false;
 }
 
@@ -108,15 +129,18 @@ export default async function authRoutes(app) {
     const rl = loginLimiter.check(ip);
     if (!rl.allowed) {
       reply.header('Retry-After', Math.ceil(rl.retryAfterMs / 1000));
+      logEvent(db, 'warn', 'auth', 'Admin login rate-limited', ip);
       return reply.code(429).send({ error: 'too many attempts — try again later' });
     }
     const { password } = req.body ?? {};
     const stored = getSetting(db, 'admin_password_hash', null);
     if (!stored) return reply.code(400).send({ error: 'setup not complete' });
     if (!password || !verifyPassword(password, stored)) {
+      logAudit(db, req, 'admin.login-failed', ip);
       return reply.code(401).send({ error: 'invalid password' });
     }
     loginLimiter.reset(ip); // legit login: clear the counter
+    logAudit(db, req, 'admin.login');
     reply.setCookie(COOKIE, 'admin', {
       signed: true,
       httpOnly: true,

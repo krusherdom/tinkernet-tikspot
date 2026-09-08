@@ -21,7 +21,7 @@ const RESTORE_STAGE = path.join(DATA_DIR, 'tikspot.db.restore');
 // Settings that are secret. Stripped from a backup unless ?secrets=1 is passed,
 // so the default download is safe to share/store without leaking router creds,
 // the NAS secret, the cookie-signing secret, or the admin password hash.
-const SENSITIVE_KEYS = ['router_pass', 'nas_secret', 'session_secret', 'admin_password_hash'];
+const SENSITIVE_KEYS = ['router_pass', 'nas_secret', 'session_secret', 'admin_password_hash', 'free_credentials'];
 
 export default async function backupRoutes(app) {
   const db = app.db;
@@ -45,8 +45,11 @@ export default async function backupRoutes(app) {
         try {
           const del = snap.prepare('DELETE FROM settings WHERE key = ?');
           for (const k of SENSITIVE_KEYS) del.run(k);
+          // Plugin credentials (recipe username/password/apiKey) live outside
+          // `settings`, so redact them here too.
+          snap.exec("UPDATE plugins SET secrets_json = '{}'");
           if (configOnly) {
-            snap.exec('DELETE FROM radacct; DELETE FROM radpostauth; VACUUM;');
+            snap.exec('DELETE FROM radacct; DELETE FROM radpostauth; DELETE FROM events; DELETE FROM plugin_grants; VACUUM;');
           }
         } finally {
           snap.close();

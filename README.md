@@ -63,15 +63,25 @@ RADIUS tables, and FreeRADIUS remains the single auth authority.
 
 ## Features
 
-- **Three login types** per portal: one-tap **free** login, **voucher** codes, and named
-  **user accounts** — mix and match on the page.
+- **Four login types** per portal: one-tap **free** login, **voucher** codes, named
+  **user accounts**, and **guest lookup** — verify guests against your own system (hotel
+  PMS, membership API…) via admin-authored recipes (JSON / XML / regex parsing, token
+  auth, stay-window checks). See `docs/guest-lookup-plugins.md` and the demo API in
+  `examples/guest-api/`.
 - **Plans** = MikroTik limits (rate `5M/5M`, data cap, session time). New: **"expire at
   midnight"** plans that renew daily (sessions are CoA-disconnected at the router's local
   midnight for a fresh quota) instead of a fixed time limit.
 - **Voucher batches** with optional date-validity windows; printable voucher sheets.
 - **MAC re-auth** ("remember device") so returning guests reconnect automatically.
-- **Live page designer** — drag-and-drop blocks (logo, heading, text, login widgets) with
-  a full **colour picker** (presets + native picker + hex) for background, glow and accent.
+- **Live page designer** — registry-driven blocks (logo, heading, text, columns, link
+  buttons, terms checkbox, sanitised HTML, all login widgets), per-block styling, themes
+  with background images, **drafts / publish / version history**, templates, multiple
+  designs, and themed connected / logged-out pages. The canvas is the real server render.
+- **Announcements & settings** — banners on the portal and admin with severity and time
+  windows; a registry-driven Settings tab (portal texts, login method, log retention…).
+- **Logs & reports** — bounded by a daily retention sweep, an app event log, CSV export,
+  and a reports view (logins per day, usage per plan, top users). Help tab with a setup
+  checklist and troubleshooting table.
 - **Guided setup wizard** that probes the router and **auto-configures** the RADIUS client,
   hotspot profile, DNS static and walled-garden — every object it creates is tagged with a
   managed comment and can be **queried back / verified** from the admin (per-component
@@ -99,9 +109,11 @@ RADIUS tables, and FreeRADIUS remains the single auth authority.
 | `app/src/radius/` | RADIUS projection (`sync`), CoA (`coa`), NAS secret (`nas`), `clients.conf` rendering, midnight-expiry sweeper |
 | `app/src/portal/` | Captive-portal rendering + the served `/m/portal.js` client |
 | `app/src/mikrotik/` | RouterOS v7 REST client (auto-configure, verify, managed-object listing) |
-| `app/src/{db,design,mac,voucher,hotspot}/` | Schema/migrations, design model, MAC re-auth, voucher sweeper, hotspot shim generator |
+| `app/src/{db,design,mac,voucher,hotspot}/` | Schema/migrations, design model + block registry + templates, MAC re-auth, voucher sweeper, hotspot shim generator |
+| `app/src/plugins/` | Guest-lookup engine (recipe schema, templating, JSON/XML/regex parsers, matching, HTTP client, grants) |
 | `app/public/admin/` | Vanilla-JS admin SPA + the captive-portal page designer |
-| `app/test/` | `node --test` unit tests (auth hashing, validators, rate limiter, clients.conf, local-date) |
+| `app/test/` | `node --test` suites: pure unit tests, in-memory SQLite tests, route tests via `app.inject`, plugin engine + demo-API integration |
+| `examples/guest-api/` | Zero-dependency demo guest API + three ready recipes for trying guest lookup |
 | `docker/` | Multi-stage, multi-arch Dockerfile + s6 service tree (`00-init`, `db-init`, `radiusd`, `node`) |
 | `docs/` | Setup & deployment guides (see below) |
 | `deploy/` | `tikspot.app.yml` — RouterOS 7.22+ container **App** manifest (self-provisions networking) |

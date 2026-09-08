@@ -8,7 +8,7 @@ export const ASSETS_DIR = process.env.TIKSPOT_ASSETS_DIR ?? `${DATA_DIR}/assets`
 
 export const HOST = process.env.TIKSPOT_HOST ?? '0.0.0.0';
 export const PORT = Number(process.env.TIKSPOT_PORT ?? 80);
-export const VERSION = process.env.TIKSPOT_VERSION ?? '0.10.0';
+export const VERSION = process.env.TIKSPOT_VERSION ?? '0.13.0';
 export const LOG_LEVEL = process.env.LOG_LEVEL ?? 'info';
 
 // The credential the hotspot "Free login" button posts. It is a single shared

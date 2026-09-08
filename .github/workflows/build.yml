@@ -23,9 +23,12 @@ jobs:
         with:
           node-version: '22'
 
-      # Unit tests (pure modules: auth hashing, validators, rate limiter,
-      # clients.conf renderer, local-date). No native deps required.
-      - name: Unit tests
+      # Tests: pure unit suites plus an in-memory SQLite suite (db.test.js) and
+      # route tests via Fastify inject — these need the app's dependencies
+      # (better-sqlite3 ships linux-x64 prebuilds, so this is quick).
+      - name: Install app dependencies
+        run: cd app && npm ci
+      - name: Tests
         run: cd app && npm test
 
       # Build a local amd64 image and enforce the <250 MB budget gate.

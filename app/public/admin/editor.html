@@ -4,12 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Tikspot · Page editor</title>
-  <link rel="stylesheet" href="/m/portal.css">
   <link rel="stylesheet" href="/admin/editor.css">
 </head>
 <body>
   <div id="ed-root"></div>
   <input type="file" id="ed-file" accept="image/*" hidden>
+  <input type="file" id="ed-json" accept="application/json,.json" hidden>
+  <div id="ed-modal" class="ed-modal" hidden></div>
   <div id="ed-toast" class="ed-toast"></div>
   <script src="/admin/editor.js"></script>
 </body>
