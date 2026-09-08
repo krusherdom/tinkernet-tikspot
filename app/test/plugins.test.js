@@ -343,7 +343,7 @@ test('validateRecipe: accepts a well-formed recipe and normalises defaults', () 
   assert.equal(result.value.enabled, true);
   assert.equal(result.value.timeoutMs, 8000);
   assert.equal(result.value.match.rules.length, 2);
-  assert.equal(result.value.version, 1);
+  assert.equal(result.value.version, 2); // RECIPE_VERSION bumped to 2 in Stage 0.15 (plugin engine expansion)
 });
 
 test('validateRecipe: rejects a non-http(s) request url', () => {

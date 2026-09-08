@@ -1,0 +1,211 @@
+{
+  "format": "tikspot-plugin",
+  "version": 2,
+  "recipe": {
+    "name": "RMS Cloud — room + any guest detail",
+    "enabled": false,
+    "planGroup": "free",
+    "timeoutMs": 8000,
+    "allowInsecureTls": false,
+    "maxRecords": 50,
+    "maxFanOut": 10,
+    "secretKeys": [
+      "agentId",
+      "agentPassword",
+      "clientId",
+      "clientPassword"
+    ],
+    "secretLabels": {
+      "agentId": "Agent ID",
+      "agentPassword": "Agent password",
+      "clientId": "Client ID",
+      "clientPassword": "Web Service password"
+    },
+    "params": {
+      "baseUrl": {
+        "label": "RMS API base URL",
+        "type": "text",
+        "default": "https://restapi12.rmscloud.com",
+        "help": "Regional RMS Cloud API origin: https://restapi12.rmscloud.com (Asia-Pacific/Australia), https://restapi13.rmscloud.com (North America), https://restapi14.rmscloud.com (Europe), https://restapi9.rmscloud.cn (China); beta servers are restapi12beta/13beta/14beta. For the bundled mock use http://<workstation LAN IP>:8091."
+      },
+      "propertyId": {
+        "label": "Property ID (optional)",
+        "help": "Limit the search to one RMS property. Leave blank to search every property this agent can access.",
+        "type": "number"
+      },
+      "moduleType": {
+        "label": "Module type",
+        "help": "The module type your RMS API access was granted for. RMS tells you this when they issue your agent credentials — commonly \"distribution\".",
+        "type": "text",
+        "default": "distribution"
+      },
+      "useTrainingDatabase": {
+        "label": "Use RMS training database",
+        "help": "Only for testing against RMS's training/sandbox data set, never for a live property.",
+        "type": "boolean",
+        "default": false
+      }
+    },
+    "paramValues": {},
+    "auth": {
+      "method": "POST",
+      "url": "{{param.baseUrl}}/authToken",
+      "headers": {},
+      "contentType": "json",
+      "bodyJson": {
+        "agentId": "{{int:secret.agentId}}",
+        "agentPassword": "{{secret.agentPassword}}",
+        "clientId": "{{int:secret.clientId}}",
+        "clientPassword": "{{secret.clientPassword}}",
+        "moduleType": [
+          "{{param.moduleType}}"
+        ],
+        "useTrainingDatabase": "{{bool:param.useTrainingDatabase}}"
+      },
+      "tokenPath": "token",
+      "tokenExpiryPath": "expiryDate",
+      "tokenTtlSecs": 3600,
+      "placement": {
+        "in": "header",
+        "name": "authtoken",
+        "prefix": ""
+      }
+    },
+    "steps": [
+      {
+        "name": "reservations",
+        "request": {
+          "method": "POST",
+          "url": "{{param.baseUrl}}/reservations/search?modelType=basic&limit=50",
+          "headers": {},
+          "contentType": "json",
+          "accept": "json",
+          "bodyJson": {
+            "areaNameLike": "{{input.room}}",
+            "listOfStatus": [
+              "arrived",
+              "confirmed"
+            ],
+            "propertyIds": [
+              "{{int:param.propertyId}}"
+            ]
+          }
+        },
+        "parse": {
+          "type": "json",
+          "root": "",
+          "fields": {
+            "lastName": "guestSurname",
+            "firstName": "guestGiven",
+            "room": "areaName",
+            "checkIn": "arrivalDate",
+            "checkOut": "departureDate",
+            "bookingRef": "id",
+            "guestId": "guestId",
+            "status": "status"
+          },
+          "dateFormat": "sql"
+        }
+      },
+      {
+        "name": "guest",
+        "forEach": "reservations",
+        "request": {
+          "method": "GET",
+          "url": "{{param.baseUrl}}/guests/{{record.guestId}}",
+          "headers": {},
+          "contentType": "json",
+          "accept": "json"
+        },
+        "parse": {
+          "type": "json",
+          "root": "",
+          "fields": {
+            "email": "email",
+            "mobile": "mobile"
+          },
+          "dateFormat": "sql"
+        }
+      }
+    ],
+    "match": {
+      "all": true,
+      "rules": [
+        {
+          "input": "room",
+          "field": "room",
+          "normalize": "digits"
+        },
+        {
+          "input": "last_name",
+          "field": "lastName",
+          "normalize": "name"
+        },
+        {
+          "input": "first_name",
+          "field": "firstName",
+          "normalize": "name"
+        },
+        {
+          "input": "email",
+          "field": "email",
+          "normalize": "email"
+        },
+        {
+          "input": "mobile",
+          "field": "mobile",
+          "normalize": "phone"
+        }
+      ],
+      "minRules": 2
+    },
+    "window": {
+      "start": "checkIn",
+      "end": "checkOut",
+      "leewayHours": 24,
+      "maxGrantHours": 168
+    },
+    "inputs": [
+      {
+        "name": "room",
+        "label": "Room / site number",
+        "type": "text",
+        "required": true,
+        "placeholder": "e.g. 101"
+      },
+      {
+        "name": "last_name",
+        "label": "Last name",
+        "type": "text",
+        "required": false,
+        "placeholder": "Smith"
+      },
+      {
+        "name": "first_name",
+        "label": "First name",
+        "type": "text",
+        "required": false,
+        "placeholder": "Jane"
+      },
+      {
+        "name": "email",
+        "label": "Email",
+        "type": "email",
+        "required": false,
+        "placeholder": "jane@example.com"
+      },
+      {
+        "name": "mobile",
+        "label": "Mobile number",
+        "type": "tel",
+        "required": false,
+        "placeholder": "+61 4xx xxx xxx"
+      }
+    ],
+    "messages": {
+      "noMatch": "We could not find a reservation matching that room and guest detail.",
+      "outsideWindow": "That reservation's stay is not active yet, or has already ended.",
+      "upstream": "RMS Cloud is not responding — please try again or ask at the front desk."
+    }
+  }
+}

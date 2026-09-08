@@ -17,9 +17,16 @@ review the URLs, add credentials, run **Test lookup**, then enable.
 | `demo-hotel-json.json` | Demo hotel API, JSON + username/password token login |
 | `demo-hotel-xml.json` | Demo hotel API, XML + `X-Api-Key` header |
 | `demo-hotel-regex.json` | Demo hotel API, plain text parsed with a named-group regex |
+| `rms-cloud-surname-room.json` | RMS Cloud (real PMS), room + surname |
+| `rms-cloud-any-detail.json` | RMS Cloud (real PMS), room + any one of last name / first name / email / mobile (multi-step) |
 
-The three demos target `examples/guest-api/` (run `npm run guest-api` on a machine the
-router's container can reach, then change the recipe's host to that machine's LAN IP).
+The three demo files target `examples/guest-api/` (run `npm run guest-api` on a machine
+the router's container can reach, then change the recipe's host to that machine's LAN IP).
+
+The two RMS Cloud recipes target the real [RMS Hospitality](https://www.rmscloud.com/)
+REST API — see [`docs/plugins/rms-cloud.md`](../docs/plugins/rms-cloud.md) for
+prerequisites, setup, and how to try them against the bundled mock
+(`examples/rms-mock/`) before you have real credentials.
 
 ## Pointing Tikspot at a different catalog
 

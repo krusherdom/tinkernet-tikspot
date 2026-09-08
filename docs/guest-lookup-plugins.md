@@ -8,7 +8,11 @@ current, and admits them onto a plan for the rest of the stay.
 
 Nothing about the external system is hard-coded: a plugin is a **recipe** you author in
 the admin (Guest lookup tab) describing how to call the API, how to parse the answer, which
-fields identify a guest and which dates bound the stay.
+fields identify a guest and which dates bound the stay. For the full field-by-field
+reference (including multi-step lookups, structured JSON bodies, and other advanced
+features), see [`docs/plugins/README.md`](plugins/README.md). Have an **RMS Cloud**
+property? Two ready-made recipes are in the catalog — see
+[`docs/plugins/rms-cloud.md`](plugins/rms-cloud.md).
 
 ## How a login flows
 
@@ -79,3 +83,7 @@ URL to your workstation's LAN IP (the router's container cannot reach `127.0.0.1
 with room `101` and the matching surname from `guests.json`, add a *Guest lookup* block to
 the page and publish. See `examples/guest-api/README.md` for details and how to edit the
 sample data.
+
+There's a second mock, `examples/rms-mock/`, shaped like the real RMS Cloud API (`npm run
+rms-mock`) — used to develop and test the two RMS Cloud catalog recipes; see
+[`docs/plugins/rms-cloud.md`](plugins/rms-cloud.md).

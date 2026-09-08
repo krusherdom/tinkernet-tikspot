@@ -50,6 +50,14 @@ function leewayWasProvided(rawWindow) {
 
 // Validate `input` (a raw, possibly-merged recipe object) and persist it under
 // `id` (null for a new row). Returns { ok:true, id } | { ok:false, error, fields }.
+//
+// Secrets are write-only and merge against the *declared* keys
+// (value.secretKeys, generalised from the fixed username/password/apiKey
+// trio in 0.13): for each declared key, an absent or '' incoming value keeps
+// whatever's already stored; an explicit `null` clears it; any other string
+// overwrites it. We look at the raw (pre-validation) `input.secrets` to tell
+// "not sent" / "cleared" apart, since validateRecipe always normalises every
+// declared key to a string.
 function save(db, id, input, existingSecrets) {
   const v = validateRecipe(input);
   if (!v.ok) return v;
@@ -64,11 +72,16 @@ function save(db, id, input, existingSecrets) {
 
   const stripped = stripSecrets(value);
   delete stripped.id;
-  const secrets = {
-    username: (value.secrets && value.secrets.username) || (existingSecrets && existingSecrets.username) || '',
-    password: (value.secrets && value.secrets.password) || (existingSecrets && existingSecrets.password) || '',
-    apiKey: (value.secrets && value.secrets.apiKey) || (existingSecrets && existingSecrets.apiKey) || '',
-  };
+  const rawSecrets = (input && input.secrets) || {};
+  const secrets = {};
+  for (const k of value.secretKeys || []) {
+    const rawV = rawSecrets[k];
+    if (rawV === null) {
+      secrets[k] = ''; // explicit clear
+    } else {
+      secrets[k] = (value.secrets && value.secrets[k]) || (existingSecrets && existingSecrets[k]) || '';
+    }
+  }
 
   if (id == null) {
     const info = db
@@ -131,17 +144,19 @@ export function getPluginPublic(db, id) {
   return recipeFromRow(row);
 }
 
-// { username, password, apiKey } -> whether each secret has a stored value
-// (never the values themselves) — for the admin UI's "has_secrets" flags.
+// { <declared secret key>: boolean } -> whether each secret has a stored
+// value (never the values themselves) — for the admin UI's "has_secrets"
+// flags. Keyed off the recipe's own secretKeys (generalised in 0.15; falls
+// back to the v1 username/password/apiKey trio for older stored recipes).
 export function getPluginSecretsMeta(db, id) {
   const row = getRow(db, id);
   if (!row) return null;
+  const recipe = recipeFromRow(row);
   const secrets = secretsFromRow(row);
-  return {
-    username: !!secrets.username,
-    password: !!secrets.password,
-    apiKey: !!secrets.apiKey,
-  };
+  const keys = Array.isArray(recipe.secretKeys) && recipe.secretKeys.length ? recipe.secretKeys : ['username', 'password', 'apiKey'];
+  const meta = {};
+  for (const k of keys) meta[k] = !!secrets[k];
+  return meta;
 }
 
 export function createPlugin(db, body) {
@@ -180,7 +195,11 @@ export function exportPlugin(db, id) {
 
 // Accepts either the full export envelope ({format, version, recipe}) or a
 // bare recipe object (e.g. one of examples/guest-api/recipes/*.json).
+// Imported recipes never arrive enabled or carrying secrets — the admin
+// reviews and fills in credentials before enabling — but `paramValues` (not
+// secret) are preserved as authored.
 export function importPlugin(db, obj) {
   const recipe = obj && typeof obj === 'object' && obj.recipe && typeof obj.recipe === 'object' ? obj.recipe : obj;
-  return createPlugin(db, recipe);
+  const safe = recipe && typeof recipe === 'object' ? { ...recipe, enabled: false, secrets: {} } : recipe;
+  return createPlugin(db, safe);
 }

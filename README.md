@@ -148,8 +148,12 @@ Browse catalog** reads its `index.json` and imports a recipe in one click (disab
 without secrets until you review it). Point *Settings → Plugin catalog URL* at any
 GitHub folder, `index.json` or single exported file to use your own catalog.
 
-- How recipes work: [`docs/guest-lookup-plugins.md`](docs/guest-lookup-plugins.md)
+- How recipes work: [`docs/guest-lookup-plugins.md`](docs/guest-lookup-plugins.md), field
+  reference [`docs/plugins/README.md`](docs/plugins/README.md)
 - Try it with the bundled demo guest API: [`examples/guest-api/`](examples/guest-api/)
+- **RMS Cloud** PMS integration, two ready-made recipes:
+  [`docs/plugins/rms-cloud.md`](docs/plugins/rms-cloud.md) (mock server:
+  [`examples/rms-mock/`](examples/rms-mock/))
 - Contribute one: [`plugins/README.md`](plugins/README.md)
 
 ## Deploying to a MikroTik

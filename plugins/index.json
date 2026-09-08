@@ -59,6 +59,50 @@
         "room",
         "name"
       ]
+    },
+    {
+      "id": "rms-cloud-surname-room",
+      "name": "RMS Cloud — surname + room",
+      "description": "RMS Hospitality Cloud (rmscloud.com) via its REST API. Logs in with agent + client credentials, searches reservations by room and surname, and windows on arrival/departure.",
+      "author": "Tikspot",
+      "file": "rms-cloud-surname-room.json",
+      "tags": [
+        "rms-cloud",
+        "hotel",
+        "pms",
+        "json",
+        "token-auth"
+      ],
+      "requires": "RMS Cloud API access: agent ID + agent password (from RMS), and a client ID + \"Web Service password\" (from the property). See docs/plugins/rms-cloud.md.",
+      "parser": "json",
+      "inputs": [
+        "room",
+        "name"
+      ]
+    },
+    {
+      "id": "rms-cloud-any-detail",
+      "name": "RMS Cloud — room + any guest detail",
+      "description": "RMS Hospitality Cloud, room number plus any one of last name / first name / email / mobile. Two-step lookup: searches reservations by room, then fetches each guest record to fill in contact details.",
+      "author": "Tikspot",
+      "file": "rms-cloud-any-detail.json",
+      "tags": [
+        "rms-cloud",
+        "hotel",
+        "pms",
+        "json",
+        "token-auth",
+        "multi-step"
+      ],
+      "requires": "RMS Cloud API access: agent ID + agent password (from RMS), and a client ID + \"Web Service password\" (from the property). See docs/plugins/rms-cloud.md.",
+      "parser": "json",
+      "inputs": [
+        "room",
+        "last_name",
+        "first_name",
+        "email",
+        "mobile"
+      ]
     }
   ]
 }

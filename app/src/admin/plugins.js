@@ -17,7 +17,7 @@ import {
 } from '../plugins/store.js';
 import { listActiveGrants, revokeGrant } from '../plugins/grants.js';
 import { runLookup, makeTokenCache } from '../plugins/engine.js';
-import { renderTemplate, templateVars } from '../plugins/template.js';
+import { renderTemplate, renderJsonTemplate, templateVars } from '../plugins/template.js';
 import { getPath, parseResponse } from '../plugins/parsers.js';
 import { httpRequest } from '../plugins/http.js';
 import { emptyRecipe } from '../plugins/recipe.js';
@@ -83,12 +83,18 @@ function renderHeaders(headerTemplates, vars) {
   return headers;
 }
 
-function buildDebugRequest(recipe, vars) {
-  const r = recipe.request;
+// `r` is a request-shaped block (recipe.request, or the first step's request
+// for a v2 steps-only recipe — see debugFetch).
+function buildDebugRequest(recipe, r, vars) {
   const url = renderTemplate(r.url, vars, { escape: 'url' });
   const headers = renderHeaders(r.headers, vars);
   let body;
-  if (r.bodyTemplate) body = renderTemplate(r.bodyTemplate, vars, { escape: escapeForContentType(r.contentType) });
+  if (r.bodyJson !== undefined) {
+    const omitEmpty = r.omitEmpty === false ? false : true;
+    body = JSON.stringify(renderJsonTemplate(r.bodyJson, vars, { omitEmpty }));
+  } else if (r.bodyTemplate) {
+    body = renderTemplate(r.bodyTemplate, vars, { escape: escapeForContentType(r.contentType) });
+  }
   if (body !== undefined && !hasHeader(headers, 'content-type')) headers['Content-Type'] = contentTypeHeader(r.contentType);
   if (r.accept && !hasHeader(headers, 'accept')) headers['Accept'] = acceptHeader(r.accept);
   return { url, method: r.method || 'GET', headers, body, timeoutMs: recipe.timeoutMs || 8000, insecureTls: !!recipe.allowInsecureTls };
@@ -132,7 +138,12 @@ async function getDebugToken(recipe) {
   const url = renderTemplate(a.url, vars, { escape: 'url' });
   const headers = renderHeaders(a.headers, vars);
   let body;
-  if (a.bodyTemplate) body = renderTemplate(a.bodyTemplate, vars, { escape: a.contentType === 'form' ? 'form' : 'json' });
+  if (a.bodyJson !== undefined) {
+    const omitEmpty = a.omitEmpty === true; // default false for auth bodies, matching engine.js
+    body = JSON.stringify(renderJsonTemplate(a.bodyJson, vars, { omitEmpty }));
+  } else if (a.bodyTemplate) {
+    body = renderTemplate(a.bodyTemplate, vars, { escape: a.contentType === 'form' ? 'form' : 'json' });
+  }
   if (body !== undefined && !hasHeader(headers, 'content-type')) {
     headers['Content-Type'] = a.contentType === 'form' ? 'application/x-www-form-urlencoded' : 'application/json';
   }
@@ -148,17 +159,30 @@ async function getDebugToken(recipe) {
   return token ? String(token) : null;
 }
 
+// A v2 steps-only recipe has no top-level request/parse — fall back to the
+// first step's, purely for this best-effort raw-response preview (the real
+// match/window logic in runLookup already walks every step correctly).
+function debugRequestParse(recipe) {
+  const firstStep = Array.isArray(recipe.steps) && recipe.steps.length ? recipe.steps[0] : null;
+  return {
+    request: recipe.request || (firstStep && firstStep.request),
+    parse: recipe.parse || (firstStep && firstStep.parse),
+  };
+}
+
 async function debugFetch(recipe, inputs) {
   try {
+    const { request, parse } = debugRequestParse(recipe);
+    if (!request || !parse) return { rawExcerpt: undefined, records: undefined };
     let token = '';
     if (recipe.auth) token = (await getDebugToken(recipe)) || '';
     const vars = templateVars(recipe, inputs, token, new Date().toISOString());
-    const req = applyDebugTokenPlacement(buildDebugRequest(recipe, vars), token, recipe.auth && recipe.auth.placement);
+    const req = applyDebugTokenPlacement(buildDebugRequest(recipe, request, vars), token, recipe.auth && recipe.auth.placement);
     const res = await httpRequest(req);
     const rawExcerpt = (res.text || '').slice(0, 2048);
     let records = [];
     try {
-      records = (parseResponse(recipe.parse, res.text).records || []).slice(0, 5);
+      records = (parseResponse(parse, res.text).records || []).slice(0, 5);
     } catch {
       records = [];
     }
@@ -256,8 +280,8 @@ export default async function pluginRoutes(app) {
       return reply.code(502).send({ error: `could not fetch the plugin: ${String(err?.message || err)}` });
     }
     if (!recipe) return reply.code(400).send({ error: 'that file is not a Tikspot plugin export' });
-    // Imported recipes never arrive enabled or with secrets; the admin reviews first.
-    const result = importPlugin(db, { ...recipe, enabled: false, secrets: {} });
+    // importPlugin() itself blanks secrets and forces enabled:false — the admin reviews first.
+    const result = importPlugin(db, recipe);
     if (!result.ok) return reply.code(400).send({ error: result.error, fields: result.fields });
     logAudit(db, req, 'plugin.catalog-import', `#${result.id} from ${res.fetchUrl}`);
     return { ok: true, id: result.id, name: recipe.name || '' };
@@ -333,7 +357,7 @@ export default async function pluginRoutes(app) {
     const start = Date.now();
     let result;
     try {
-      result = await runLookup({ recipe, inputs, tokenCache: makeTokenCache() });
+      result = await runLookup({ recipe, inputs, tokenCache: makeTokenCache(), diagnostics: true });
     } catch (err) {
       result = { ok: false, reason: 'upstream', detail: String(err?.message || err) };
     }

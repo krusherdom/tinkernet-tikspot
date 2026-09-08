@@ -174,5 +174,16 @@ export function parseDate(value, dateFormat) {
     return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
   }
 
+  // 'sql': `YYYY-MM-DD HH:MM:SS` (also accepts a bare `YYYY-MM-DD`),
+  // always interpreted as UTC — used for guest systems (e.g. RMS Cloud) that
+  // return property-local wall-clock times without an offset; the window's
+  // leeway absorbs the difference.
+  if (format === 'sql') {
+    const m = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}):(\d{2}))?$/.exec(s);
+    if (!m) return null;
+    const [, y, mo, d, h, mi, se] = m;
+    return Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(h || 0), Number(mi || 0), Number(se || 0));
+  }
+
   return null;
 }

@@ -1038,11 +1038,45 @@
     return isNaN(n) ? fallback : n;
   }
 
-  // recipe (server shape) -> editor draft (ordered rows, on/off toggles)
+  // options array <-> "value|label" per-line text, used by select-type params
+  function pgOptionsToText(options) {
+    return (options || []).map(function (o) {
+      if (o && typeof o === 'object') return String(o.value) + (o.label != null && String(o.label) !== String(o.value) ? '|' + o.label : '');
+      return String(o);
+    }).join('\n');
+  }
+  function pgOptionsFromText(text) {
+    return String(text || '').split('\n').map(function (l) { return l.trim(); }).filter(Boolean).map(function (line) {
+      var i = line.indexOf('|');
+      return i === -1 ? { value: line, label: line } : { value: line.slice(0, i).trim(), label: line.slice(i + 1).trim() };
+    });
+  }
+  function pgSecretPlaceholders(keys) {
+    return (keys || []).map(function (k) { return '<code>{{secret.' + esc(k) + '}}</code>'; }).join(' / ');
+  }
+
+  // recipe (server shape) -> editor draft (ordered rows, on/off toggles).
+  // `_orig` keeps a clone of the loaded recipe so pgRecipeFromDraft can
+  // round-trip anything the guided form doesn't manage (steps, maxFanOut,
+  // auth.bodyJson, request.bodyJson, ...) instead of rebuilding from scratch.
   function pgDraftFromRecipe(r) {
     r = r || {};
     var a = r.auth || {}, pl = a.placement || {}, w = r.window || {}, rq = r.request || {}, ps = r.parse || {}, mt = r.match || {};
+    var secretKeys = (r.secretKeys && r.secretKeys.length) ? r.secretKeys.slice() : ['username', 'password', 'apiKey'];
+    var secretLabels = {};
+    Object.keys(r.secretLabels || {}).forEach(function (k) { secretLabels[k] = r.secretLabels[k]; });
+    var paramsObj = r.params || {}, paramValuesObj = r.paramValues || {};
+    var paramRows = Object.keys(paramsObj).map(function (name) {
+      var p = paramsObj[name] || {};
+      var dflt = p.default == null ? '' : p.default;
+      return {
+        name: name, label: p.label || '', help: p.help || '', type: p.type || 'text',
+        default: String(dflt), optionsText: pgOptionsToText(p.options),
+        value: String(Object.prototype.hasOwnProperty.call(paramValuesObj, name) ? paramValuesObj[name] : dflt),
+      };
+    });
     return {
+      _orig: JSON.parse(JSON.stringify(r)),
       name: r.name || '', enabled: r.enabled !== false, planGroup: r.planGroup || 'free',
       timeoutMs: r.timeoutMs == null ? '' : String(r.timeoutMs),
       allowInsecureTls: !!r.allowInsecureTls,
@@ -1064,6 +1098,7 @@
       fieldRows: Object.keys(ps.fields || {}).map(function (k) { return { key: k, path: String(ps.fields[k] == null ? '' : ps.fields[k]) }; }),
       match: {
         all: mt.all !== false,
+        minRules: mt.minRules == null ? '' : String(mt.minRules),
         rules: (mt.rules || []).map(function (ru) {
           var any = ru.anyOf && ru.anyOf.length;
           return { input: ru.input || '', mode: any ? 'anyOf' : 'field', field: ru.field || '', anyOf: any ? ru.anyOf.slice() : [], normalize: ru.normalize || 'trim' };
@@ -1080,39 +1115,59 @@
           placeholder: i.placeholder || '', autocomplete: i.autocomplete || '' };
       }),
       messages: { noMatch: (r.messages && r.messages.noMatch) || '', outsideWindow: (r.messages && r.messages.outsideWindow) || '', upstream: (r.messages && r.messages.upstream) || '' },
+      secretKeys: secretKeys,
+      secretLabels: secretLabels,
+      params: paramRows,
+      hasSteps: !!(r.steps && r.steps.length),
+      stepsCount: (r.steps && r.steps.length) || 0,
     };
   }
 
   // editor draft -> recipe (server shape). Blank numbers are omitted so the
   // server's own defaults apply (window.leewayHours especially: absent means
-  // "use the global default from Settings").
+  // "use the global default from Settings"). Everything the guided form
+  // doesn't manage (steps, maxFanOut, auth.bodyJson, auth.tokenExpiryPath,
+  // request.bodyJson, request.omitEmpty, ...) round-trips untouched from
+  // draft._orig instead of being rebuilt from scratch.
   function pgRecipeFromDraft(d, secrets) {
-    var r = { name: d.name, enabled: !!d.enabled, planGroup: d.planGroup || 'free' };
-    if (d.timeoutMs !== '') r.timeoutMs = pgNum(d.timeoutMs, 8000);
+    var r = d._orig ? JSON.parse(JSON.stringify(d._orig)) : {};
+    delete r.id; delete r.has_secrets; delete r.version; delete r.created_at; delete r.updated_at; delete r.secrets;
+    r.name = d.name; r.enabled = !!d.enabled; r.planGroup = d.planGroup || 'free';
+    if (d.timeoutMs !== '') r.timeoutMs = pgNum(d.timeoutMs, 8000); else delete r.timeoutMs;
     r.allowInsecureTls = !!d.allowInsecureTls;
-    if (d.maxRecords !== '') r.maxRecords = pgNum(d.maxRecords, 200);
+    if (d.maxRecords !== '') r.maxRecords = pgNum(d.maxRecords, 200); else delete r.maxRecords;
     if (d.authOn) {
-      r.auth = {
+      r.auth = Object.assign({}, r.auth, {
         method: d.auth.method, url: d.auth.url, headers: pgRowsToObj(d.authHeaderRows),
         contentType: d.auth.contentType, bodyTemplate: d.auth.bodyTemplate, tokenPath: d.auth.tokenPath,
         placement: { in: d.auth.placement.in, name: d.auth.placement.name, prefix: d.auth.placement.prefix },
-      };
-      if (d.auth.tokenTtlSecs !== '') r.auth.tokenTtlSecs = pgNum(d.auth.tokenTtlSecs, 3600);
+      });
+      if (d.auth.tokenTtlSecs !== '') r.auth.tokenTtlSecs = pgNum(d.auth.tokenTtlSecs, 3600); else delete r.auth.tokenTtlSecs;
     }
-    r.request = { method: d.request.method, url: d.request.url, headers: pgRowsToObj(d.headerRows),
-      contentType: d.request.contentType, bodyTemplate: d.request.bodyTemplate };
-    if (d.request.accept) r.request.accept = d.request.accept;
-    var fields = {};
-    d.fieldRows.forEach(function (f) { if (String(f.key).trim()) fields[String(f.key).trim()] = f.path; });
-    r.parse = { type: d.parse.type, root: d.parse.root, recordRegex: d.parse.recordRegex, fields: fields, dateFormat: d.parse.dateFormat };
-    r.match = {
+    // authOn off: leave r.auth exactly as loaded (or absent for a new plugin) —
+    // an update that omits `auth` keeps the stored step; only Raw JSON's
+    // explicit `auth: null` clears it.
+    if (!d.hasSteps) {
+      r.request = Object.assign({}, r.request, {
+        method: d.request.method, url: d.request.url, headers: pgRowsToObj(d.headerRows),
+        contentType: d.request.contentType, bodyTemplate: d.request.bodyTemplate,
+      });
+      if (d.request.accept) r.request.accept = d.request.accept; else delete r.request.accept;
+      var fields = {};
+      d.fieldRows.forEach(function (f) { if (String(f.key).trim()) fields[String(f.key).trim()] = f.path; });
+      r.parse = Object.assign({}, r.parse, { type: d.parse.type, root: d.parse.root, recordRegex: d.parse.recordRegex, fields: fields, dateFormat: d.parse.dateFormat });
+    }
+    // hasSteps: the guided form doesn't touch request/parse/steps — they
+    // round-trip from _orig untouched (edit them in Raw JSON instead).
+    r.match = Object.assign({}, r.match, {
       all: !!d.match.all,
       rules: d.match.rules.map(function (ru) {
         return ru.mode === 'anyOf'
           ? { input: ru.input, anyOf: ru.anyOf.slice(), normalize: ru.normalize }
           : { input: ru.input, field: ru.field, normalize: ru.normalize };
       }),
-    };
+    });
+    if (d.match.minRules !== '') r.match.minRules = pgNum(d.match.minRules, 0); else delete r.match.minRules;
     if (d.windowOn) {
       r.window = { start: d.window.start, end: d.window.end };
       if (d.window.leewayHours !== '') r.window.leewayHours = pgNum(d.window.leewayHours, 24);
@@ -1124,12 +1179,37 @@
       return o;
     });
     r.messages = { noMatch: d.messages.noMatch, outsideWindow: d.messages.outsideWindow, upstream: d.messages.upstream };
-    if (secrets) r.secrets = { username: secrets.username || '', password: secrets.password || '', apiKey: secrets.apiKey || '' };
+    r.secretKeys = d.secretKeys.slice();
+    var secretLabels = {};
+    Object.keys(d.secretLabels || {}).forEach(function (k) { if (d.secretKeys.indexOf(k) !== -1 && d.secretLabels[k]) secretLabels[k] = d.secretLabels[k]; });
+    if (Object.keys(secretLabels).length) r.secretLabels = secretLabels; else delete r.secretLabels;
+    r.params = {};
+    r.paramValues = {};
+    d.params.forEach(function (p) {
+      var name = String(p.name || '').trim();
+      if (!name) return;
+      var entry = { type: p.type || 'text' };
+      if (p.label) entry.label = p.label;
+      if (p.help) entry.help = p.help;
+      if (p.type === 'select') entry.options = pgOptionsFromText(p.optionsText);
+      if (p.default !== '') entry.default = p.default;
+      r.params[name] = entry;
+      if (p.type === 'boolean') {
+        r.paramValues[name] = p.value === true || p.value === 'true';
+      } else if (p.value !== '' && p.value != null) {
+        r.paramValues[name] = p.value;
+      }
+    });
+    if (secrets) {
+      var sOut = {};
+      d.secretKeys.forEach(function (k) { if (secrets[k]) sOut[k] = secrets[k]; });
+      r.secrets = sOut;
+    }
     return r;
   }
   function pgDirty() {
     if (!pg) return false;
-    if (pg.secrets.username || pg.secrets.password || pg.secrets.apiKey) return true;
+    if (pg.draft.secretKeys.some(function (k) { return !!pg.secrets[k]; })) return true;
     return JSON.stringify(pgRecipeFromDraft(pg.draft)) !== pg.savedJson;
   }
   function pgAllFields() {
@@ -1299,16 +1379,17 @@
     var jobs = [api('/api/plans'), id == null ? api('/api/plugins/recipe-template') : api('/api/plugins/' + id)];
     Promise.all(jobs).then(function (res) {
       var recipe = res[1] || {};
-      var hasSecrets = recipe.has_secrets || { username: false, password: false, apiKey: false };
+      var hasSecrets = recipe.has_secrets || {};
       delete recipe.has_secrets;
       var draft = pgDraftFromRecipe(recipe);
+      draft.secretKeys.forEach(function (k) { if (!(k in hasSecrets)) hasSecrets[k] = false; });
       pg = {
         id: id == null ? null : Number(recipe.id || id),
         draft: draft,
         savedJson: JSON.stringify(pgRecipeFromDraft(draft)),
         hasSecrets: hasSecrets,
         hadAuth: !!recipe.auth, hadWindow: !!recipe.window,
-        secrets: { username: '', password: '', apiKey: '' },
+        secrets: {},
         plans: (res[0] && res[0].plans) || [],
         raw: false, rawText: '',
         testInputs: {}, testResult: null, testRunning: false,
@@ -1362,7 +1443,7 @@
       '</div>' +
       '<div class="field pg-f"><label for="pg-au-b">Body template</label>' +
       pgTa('auth.bodyTemplate', a.bodyTemplate, ' id="pg-au-b" rows="3" class="mono-ta"') +
-      '<span class="hint">Use <code>{{secret.username}}</code> / <code>{{secret.password}}</code> / <code>{{secret.apiKey}}</code> — e.g. <code>{"username":"{{secret.username}}","password":"{{secret.password}}"}</code></span></div>' +
+      '<span class="hint">Reference your declared secrets: ' + pgSecretPlaceholders(d.secretKeys) + '.</span></div>' +
       '<div class="field pg-f"><label>Login headers</label>' + pgKvRows(d.authHeaderRows, 'add-ahdr', 'del-ahdr', 'authHeaderRows', ['Header', 'Value']) + '</div>' +
       '<div class="row pg-r">' +
       fieldH('pg-au-tp', 'Token path', pgTxt('auth.tokenPath', a.tokenPath, ' id="pg-au-tp" placeholder="token"'), 'Dotted path to the token in the JSON reply, e.g. <code>data.access_token</code>.') +
@@ -1375,21 +1456,30 @@
   }
 
   function pgSectionSecrets() {
-    var h = pg.hasSecrets || {};
-    function one(key, label, hint) {
+    var d = pg.draft, h = pg.hasSecrets || {};
+    var defaultHints = {
+      username: 'Template as <code>{{secret.username}}</code>.',
+      password: 'Template as <code>{{secret.password}}</code>.',
+      apiKey: 'Template as <code>{{secret.apiKey}}</code> — often in a header.',
+    };
+    var rows = d.secretKeys.map(function (key, ix) {
       var stored = !!h[key];
-      return '<div class="field pg-f"><label for="pg-s-' + key + '">' + label + '</label>' +
-        '<div class="pg-secret"><input id="pg-s-' + key + '" type="password" autocomplete="new-password" data-secret="' + key + '" value="" placeholder="' + (stored ? '(unchanged)' : 'not set') + '">' +
+      var label = d.secretLabels[key] || key;
+      var hint = defaultHints[key] || ('Template as <code>{{secret.' + esc(key) + '}}</code>.');
+      return '<div class="field pg-f"><label for="pg-s-' + esc(key) + '" style="display:flex;align-items:center;justify-content:space-between;gap:6px">' +
+        '<span>' + esc(label) + '</span>' +
+        '<button type="button" class="btn sm kv-x" data-act="del-secretkey:' + ix + '" title="Remove this secret key">×</button></label>' +
+        '<div class="pg-secret"><input id="pg-s-' + esc(key) + '" type="password" autocomplete="new-password" data-secret="' + esc(key) + '" value="" placeholder="' + (stored ? '(unchanged)' : 'not set') + '">' +
         '<span class="pill ' + (stored ? 'set">stored' : 'notset">empty') + '</span></div>' +
         '<span class="hint">' + hint + '</span></div>';
-    }
+    }).join('');
     return '<div class="pg-sub"><h3>Secrets</h3>' +
       '<p class="hint">Stored separately from the recipe and never sent back to this page. Leave a box blank to keep what is already stored.</p>' +
-      '<div class="row pg-r">' +
-      one('username', 'Username', 'Template as <code>{{secret.username}}</code>.') +
-      one('password', 'Password', 'Template as <code>{{secret.password}}</code>.') +
-      one('apiKey', 'API key', 'Template as <code>{{secret.apiKey}}</code> — often in a header.') +
-      '</div></div>';
+      '<div class="row pg-r">' + rows + '</div>' +
+      '<div class="row pg-r" style="margin-top:10px"><div class="field pg-f" style="flex:1 1 200px">' +
+      '<label for="pg-newsecret">Add secret key</label><input id="pg-newsecret" placeholder="e.g. clientId"></div>' +
+      '<button type="button" class="btn sm" data-act="add-secretkey">+ Add</button></div>' +
+      '</div>';
   }
 
   function pgSectionRequest() {
@@ -1403,7 +1493,7 @@
       fieldH('pg-rq-ct', 'Body content type', pgSel('request.contentType', ['json', 'form', 'xml', 'text'], rq.contentType, ' id="pg-rq-ct"'), 'Only matters when there is a body.') +
       fieldH('pg-rq-ac', 'Accept', pgSel('request.accept', [['', '(none)'], 'json', 'xml', 'text'], rq.accept, ' id="pg-rq-ac"'), 'Sets the <code>Accept</code> header if the API needs one.') +
       '</div>' +
-      '<div class="field pg-f"><label>Headers</label>' + pgKvRows(d.headerRows, 'add-hdr', 'del-hdr', 'headerRows', ['X-Api-Key', '{{secret.apiKey}}']) + '</div>' +
+      '<div class="field pg-f"><label>Headers</label>' + pgKvRows(d.headerRows, 'add-hdr', 'del-hdr', 'headerRows', ['X-Api-Key', '{{secret.' + (d.secretKeys[d.secretKeys.length - 1] || 'apiKey') + '}}']) + '</div>' +
       '<div class="field pg-f"><label for="pg-rq-b">Body template</label>' + pgTa('request.bodyTemplate', rq.bodyTemplate, ' id="pg-rq-b" rows="3" class="mono-ta" placeholder="(leave empty for GET)"') +
       '<span class="hint">Rendered and escaped for the content type above.</span></div></div>';
   }
@@ -1432,7 +1522,7 @@
       '<div class="row pg-r">' +
       fieldH('pg-ps-t', 'Response type', pgSel('parse.type', ['json', 'xml', 'regex'], ps.type, ' id="pg-ps-t" data-restructure'), '') +
       ctx +
-      fieldH('pg-ps-df', 'Date format', pgSel('parse.dateFormat', ['iso', 'dmy', 'mdy', 'ymd', 'epoch'], ps.dateFormat, ' id="pg-ps-df"'), 'How check-in / check-out dates are written in the response.') +
+      fieldH('pg-ps-df', 'Date format', pgSel('parse.dateFormat', ['iso', 'dmy', 'mdy', 'ymd', 'epoch', 'sql'], ps.dateFormat, ' id="pg-ps-df"'), 'How check-in / check-out dates are written in the response. <code>sql</code> = <code>YYYY-MM-DD HH:MM:SS</code> (UTC).') +
       '</div>' +
       '<div class="field pg-f"><label>Field map</label><div class="kv-list">' + rows + '</div>' +
       '<button type="button" class="btn sm" data-act="add-field">+ Add field</button>' +
@@ -1471,6 +1561,10 @@
       '<div class="rule-list">' + rows + '</div>' +
       '<button type="button" class="btn sm" data-act="add-rule">+ Add rule</button>' +
       '<div class="pg-toggles" style="margin-top:12px">' + pgChk('match.all', d.match.all, 'Guest must match every rule ' + help('Off: matching any single rule is enough.')) + '</div>' +
+      '<div class="row pg-r" style="margin-top:12px">' +
+      fieldH('pg-m-minrules', 'Minimum satisfied rules', pgTxt('match.minRules', d.match.minRules, ' id="pg-m-minrules" type="number" min="0" data-path="match.minRules" placeholder="0"'),
+        'A rule is "satisfied" when its input was non-empty and it matched. Require at least this many satisfied rules, on top of the check above — e.g. a required room plus at least one of several optional identifiers. 0 = off (today\'s behaviour).') +
+      '</div>' +
       (d.inputs.length ? '' : '<p class="hint" style="color:var(--amber)">Define at least one guest input below first — rules point at inputs by name.</p>') +
       '</div>';
   }
@@ -1511,6 +1605,64 @@
       '<div class="in-head"><span>Name</span><span>Label</span><span>Type</span><span></span><span>Placeholder</span><span></span></div>' +
       '<div class="in-list">' + rows + '</div>' +
       '<button type="button" class="btn sm" data-act="add-input">+ Add input</button></div>';
+  }
+
+  function pgSectionStepsNotice() {
+    return '<div class="card pg-sec"><h2>Multi-step lookup</h2>' +
+      '<p class="hint">This recipe uses ' + pg.draft.stepsCount + ' steps — edit them in Raw JSON.</p></div>';
+  }
+
+  // One value widget for a declared param, bound to params.<ix>.value
+  // (falls back to the param's own default at render time — see pgDraftFromRecipe).
+  function pgParamValueField(p, ix) {
+    var label = p.label || p.name;
+    var id = 'pg-pv-' + ix;
+    if (p.type === 'boolean') {
+      return '<div class="field pg-f">' + pgChk('params.' + ix + '.value', p.value === true || p.value === 'true', esc(label) + (p.help ? ' ' + help(p.help) : '')) + '</div>';
+    }
+    var input;
+    if (p.type === 'select') {
+      var opts = pgOptionsFromText(p.optionsText).map(function (o) { return [o.value, o.label]; });
+      input = pgSel('params.' + ix + '.value', opts, p.value, ' id="' + id + '"');
+    } else if (p.type === 'number') {
+      input = pgTxt('params.' + ix + '.value', p.value, ' id="' + id + '" type="number"');
+    } else {
+      input = pgTxt('params.' + ix + '.value', p.value, ' id="' + id + '"');
+    }
+    return fieldH(id, esc(label), input, p.help ? esc(p.help) : '');
+  }
+
+  function pgSectionParamValues() {
+    var d = pg.draft, htmls = [];
+    d.params.forEach(function (p, ix) { if (String(p.name || '').trim()) htmls.push(pgParamValueField(p, ix)); });
+    if (!htmls.length) return '<p class="muted kv-empty">No parameters declared yet — add one below.</p>';
+    return '<div class="row pg-r">' + htmls.join('') + '</div>';
+  }
+
+  function pgSectionParamsDeclare() {
+    var d = pg.draft;
+    var rows = d.params.length ? d.params.map(function (p, ix) {
+      var showOpts = p.type === 'select';
+      return '<div class="kv-row">' +
+        '<input class="kv-k" data-bind="params.' + ix + '.name" value="' + esc(p.name) + '" placeholder="name" data-restructure>' +
+        '<input class="kv-v" data-bind="params.' + ix + '.label" value="' + esc(p.label) + '" placeholder="Label">' +
+        '<select class="kv-pick" data-bind="params.' + ix + '.type" data-restructure>' + pgOpts(['text', 'number', 'boolean', 'select'], p.type) + '</select>' +
+        '<input data-bind="params.' + ix + '.default" value="' + esc(p.default) + '" placeholder="default" style="flex:1 1 120px">' +
+        '<button type="button" class="btn sm kv-x" data-act="del-param:' + ix + '" title="Remove">×</button></div>' +
+        (showOpts ? '<div class="field pg-f"><label>Options (one per line, <span class="mono">value|label</span>)</label>' +
+          pgTa('params.' + ix + '.optionsText', p.optionsText, ' rows="2" class="mono-ta"') + '</div>' : '') +
+        '<div class="field pg-f" style="margin-bottom:10px"><label>Help text</label>' + pgTxt('params.' + ix + '.help', p.help, '') + '</div>';
+    }).join('') : '<p class="muted kv-empty">No parameters declared yet.</p>';
+    return '<div class="pg-sub"><h3>Declare parameters</h3>' +
+      '<p class="hint">Operator-facing config — regions, feature flags, limits (not secret — exported with the recipe). Reference as <code>{{param.&lt;name&gt;}}</code>.</p>' +
+      '<div class="kv-list">' + rows + '</div>' +
+      '<button type="button" class="btn sm" data-act="add-param">+ Add parameter</button></div>';
+  }
+
+  function pgSectionParams() {
+    return '<div class="card pg-sec"><h2>Parameters</h2>' +
+      '<p class="hint">Non-secret configuration this recipe needs.</p>' +
+      pgSectionParamValues() + pgSectionParamsDeclare() + '</div>';
   }
 
   function pgSectionMessages() {
@@ -1598,8 +1750,9 @@
         '<p class="hint">The whole recipe as the API sees it. Switching back to the guided form parses this; invalid JSON keeps you here. Secrets you type here are sent on save — blank values keep whatever is stored.</p>' +
         '<textarea id="pg-raw" class="raw-json" spellcheck="false">' + esc(pg.rawText) + '</textarea></div>';
     } else {
-      body = pgSectionBasics() + pgSectionAuth() + pgSectionRequest() + pgSectionParser() +
-        pgSectionMatch() + pgSectionWindow() + pgSectionInputs() + pgSectionMessages();
+      body = pgSectionBasics() + pgSectionAuth() +
+        (d.hasSteps ? pgSectionStepsNotice() : (pgSectionRequest() + pgSectionParser())) +
+        pgSectionMatch() + pgSectionWindow() + pgSectionInputs() + pgSectionParams() + pgSectionMessages();
     }
     var errs = pg.errorSummary && pg.errorSummary.length
       ? '<div class="card pg-errs"><h2>Could not save</h2><ul>' + pg.errorSummary.map(function (e) {
@@ -1689,10 +1842,40 @@
       var tmp = d.inputs[i]; d.inputs[i] = d.inputs[j]; d.inputs[j] = tmp;
       return pgRender();
     }
+    if (a === 'add-param') { d.params.push({ name: '', label: '', help: '', type: 'text', default: '', optionsText: '', value: '' }); return pgRender(); }
+    if (a === 'del-param') { d.params.splice(Number(p[1]), 1); return pgRender(); }
+    if (a === 'add-secretkey') {
+      var skEl = document.getElementById('pg-newsecret');
+      var sk = skEl ? skEl.value.trim() : '';
+      if (!sk) return;
+      if (!/^[a-zA-Z][a-zA-Z0-9_]{0,30}$/.test(sk)) return toast('Secret key must start with a letter, then letters/digits/underscore (max 31 chars)', true);
+      if (d.secretKeys.indexOf(sk) !== -1) return toast('That secret key already exists', true);
+      if (d.secretKeys.length >= 16) return toast('A recipe can declare at most 16 secret keys', true);
+      d.secretKeys.push(sk);
+      return pgRender();
+    }
+    if (a === 'del-secretkey') {
+      var skIx = Number(p[1]), removed = d.secretKeys[skIx];
+      d.secretKeys.splice(skIx, 1);
+      if (removed) { delete pg.secrets[removed]; if (pg.hasSecrets) delete pg.hasSecrets[removed]; delete d.secretLabels[removed]; }
+      return pgRender();
+    }
     if (a === 'cancel') { pg = null; return show('plugins'); }
     if (a === 'raw') return pgToggleRaw();
     if (a === 'save') return pgSave().catch(function () { /* surfaced as a toast + inline errors */ });
     if (a === 'run-test') return pgRunTest();
+  }
+
+  // Never echoes stored secret values back into the guided form — this only
+  // picks up secret values the admin just typed directly into the Raw JSON
+  // textarea, so they aren't lost when switching back to the guided form.
+  function pgSecretsFromParsed(parsed) {
+    var keys = (parsed && parsed.secretKeys && parsed.secretKeys.length) ? parsed.secretKeys : ['username', 'password', 'apiKey'];
+    var out = {};
+    if (parsed && parsed.secrets && typeof parsed.secrets === 'object') {
+      keys.forEach(function (k) { if (parsed.secrets[k]) out[k] = parsed.secrets[k]; });
+    }
+    return out;
   }
 
   function pgToggleRaw() {
@@ -1705,10 +1888,9 @@
     try { parsed = JSON.parse(pg.rawText); } catch (e) { return toast('That is not valid JSON — ' + e.message, true); }
     if (!parsed || typeof parsed !== 'object' || parsed instanceof Array) return toast('The recipe must be a JSON object', true);
     if (parsed.recipe && typeof parsed.recipe === 'object') parsed = parsed.recipe;
-    if (parsed.secrets && typeof parsed.secrets === 'object') {
-      pg.secrets = { username: parsed.secrets.username || '', password: parsed.secrets.password || '', apiKey: parsed.secrets.apiKey || '' };
-    }
+    if (parsed.secrets && typeof parsed.secrets === 'object') pg.secrets = pgSecretsFromParsed(parsed);
     pg.draft = pgDraftFromRecipe(parsed);
+    pg.draft.secretKeys.forEach(function (k) { if (!(k in pg.hasSecrets)) pg.hasSecrets[k] = false; });
     pg.raw = false;
     pg.errorSummary = null;
     pgRender();
@@ -1737,8 +1919,9 @@
       var parsed;
       try { parsed = JSON.parse(pg.rawText); } catch (e) { return toast('That is not valid JSON — ' + e.message, true); }
       if (parsed && parsed.recipe && typeof parsed.recipe === 'object') parsed = parsed.recipe;
-      if (parsed && parsed.secrets) pg.secrets = { username: parsed.secrets.username || '', password: parsed.secrets.password || '', apiKey: parsed.secrets.apiKey || '' };
+      if (parsed && parsed.secrets) pg.secrets = pgSecretsFromParsed(parsed);
       pg.draft = pgDraftFromRecipe(parsed || {});
+      pg.draft.secretKeys.forEach(function (k) { if (!(k in pg.hasSecrets)) pg.hasSecrets[k] = false; });
       pg.raw = false;
       pgRender();
     }

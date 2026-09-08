@@ -68,12 +68,29 @@ function evalRule(rule, record, inputs) {
 }
 
 // matchRecord(matchSpec, record, inputs) -> boolean
-// matchSpec = { all: true|false, rules:[{input, field|anyOf, normalize}] }
+// matchSpec = { all: true|false, rules:[{input, field|anyOf, normalize}], minRules? }
+//
+// `minRules` (default 0 = no extra gating) additionally requires at least N
+// rules to have been "satisfied" — meaning their input was non-empty AND it
+// actually matched the record (as opposed to vacuously passing because the
+// input was empty and the rule wasn't required). This lets a recipe with one
+// required field (e.g. room) plus several optional identifiers demand that
+// at least one of those optional identifiers also matched.
 export function matchRecord(matchSpec, record, inputs) {
   const rules = (matchSpec && matchSpec.rules) || [];
   if (!rules.length) return false;
-  const results = rules.map((rule) => evalRule(rule, record, inputs));
-  return matchSpec.all === false ? results.some(Boolean) : results.every(Boolean);
+  let satisfied = 0;
+  const results = rules.map((rule) => {
+    const { value } = resolveInput(inputs, rule.input);
+    const passed = evalRule(rule, record, inputs);
+    if (!isEmptyValue(value) && passed) satisfied += 1;
+    return passed;
+  });
+  const overallPass = matchSpec.all === false ? results.some(Boolean) : results.every(Boolean);
+  if (!overallPass) return false;
+  const minRules = matchSpec && Number.isFinite(matchSpec.minRules) ? matchSpec.minRules : 0;
+  if (minRules > 0 && satisfied < minRules) return false;
+  return true;
 }
 
 // findGuest(matchSpec, records, inputs) -> first matching record, or null.
