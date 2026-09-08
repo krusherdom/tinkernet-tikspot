@@ -24,6 +24,7 @@
           var err = new Error(msg);
           err.status = r.status;
           if (j.fields) err.fields = j.fields;
+          if (j.hint) err.hint = j.hint;
           throw err;
         }
         return j;
@@ -992,6 +993,7 @@
   var CANON_FIELDS = ['firstName', 'lastName', 'fullName', 'room', 'mobile', 'email', 'checkIn', 'checkOut', 'bookingRef'];
   var NORMALIZERS = ['trim', 'name', 'phone', 'email', 'digits', 'upper'];
   var GUEST_API_DOCS = 'https://github.com/omegatron/tinkernet-tikspot/blob/main/examples/guest-api/README.md';
+  var CATALOG_DEFAULT_URL = 'https://raw.githubusercontent.com/omegatron/tinkernet-tikspot/main/plugins/index.json';
   var routeSub = '';          // the part after "tab/" in the hash
   var guestsTimer = null;     // Guests tab auto-refresh
   var pg = null;              // plugin editor state (null when listing)
@@ -1167,7 +1169,38 @@
         '<button class="btn" id="pg-import">Import JSON</button>' +
         '<input type="file" id="pg-file" accept="application/json,.json" style="display:none">' +
         '</div><p class="hint" style="margin-top:10px">Import accepts either an exported <span class="mono">.tikspot-plugin.json</span> bundle or a bare recipe file such as ' +
-        '<span class="mono">examples/guest-api/recipes/hotel-json.json</span>. ' + help('Exports never contain secrets — re-enter the username / password / API key after importing.') + '</p></div>';
+        '<span class="mono">examples/guest-api/recipes/hotel-json.json</span>. ' + help('Exports never contain secrets — re-enter the username / password / API key after importing.') + '</p></div>' +
+        '<div class="card"><h2>Plugin catalog</h2>' +
+        '<p class="hint" style="margin:-6px 0 14px">Browse community-published recipes and import one to review. ' +
+        help('Accepts a catalog index.json URL, a GitHub folder link (…/tree/main/plugins), or a raw/blob file URL. The container needs outbound internet to reach it.') + '</p>' +
+        '<div class="row"><div class="field" style="flex:2 1 380px"><label for="pg-cat-url">Catalog source</label>' +
+        '<input type="text" id="pg-cat-url" style="width:100%" placeholder="' + esc(CATALOG_DEFAULT_URL) + '"></div>' +
+        '<button class="btn primary" id="pg-cat-go">Browse</button></div>' +
+        '<p class="hint" style="margin-top:8px"><a href="#" id="pg-cat-savedefault">Save as default</a></p>' +
+        '<div id="pg-cat-results"></div><div id="pg-cat-foot"></div></div>';
+
+      var installedNames = list.map(function (p) { return p.name; });
+      var catUrlEl = view.querySelector('#pg-cat-url');
+      var catResultsEl = view.querySelector('#pg-cat-results');
+      var catFootEl = view.querySelector('#pg-cat-foot');
+      catUrlEl.value = CATALOG_DEFAULT_URL;
+      api('/api/settings').then(function (r) {
+        (r.groups || []).forEach(function (g) {
+          (g.settings || []).forEach(function (s) {
+            if (s.key === 'plugin_catalog_url' && s.value) catUrlEl.value = s.value;
+          });
+        });
+      }).catch(function () { /* keep the built-in default */ });
+      view.querySelector('#pg-cat-go').onclick = function () {
+        pgCatalogLoad(val('pg-cat-url') || CATALOG_DEFAULT_URL, installedNames, catResultsEl, catFootEl);
+      };
+      view.querySelector('#pg-cat-savedefault').onclick = function (e) {
+        e.preventDefault();
+        var u = val('pg-cat-url') || CATALOG_DEFAULT_URL;
+        api('/api/settings', { method: 'PATCH', body: { plugin_catalog_url: u } })
+          .then(function () { toast('Saved as default catalog', { level: 'ok' }); })
+          .catch(function (err) { toast(err.message, true); });
+      };
 
       view.querySelectorAll('[data-pgtest]').forEach(function (b) {
         b.onclick = function () { pgFocusTest = true; show('plugins/' + b.dataset.pgtest); };
@@ -1205,6 +1238,59 @@
           .catch(function (e) { toast(e.message, true); });
       };
     }).catch(function (e) { view.innerHTML = '<h1>Guest lookup</h1><p class="bad">' + esc(e.message) + '</p>'; });
+  }
+
+  // ---- guest lookup: browse-catalog card (list view only) ----
+  function pgCatalogRow(p, installedNames) {
+    var installed = installedNames.indexOf(p.name) !== -1;
+    var inputs = (p.inputs || []).map(function (i) { return '<span class="chip">' + esc(i) + '</span>'; }).join('');
+    var tags = (p.tags || []).map(function (t) { return '<span class="chip">' + esc(t) + '</span>'; }).join('');
+    return '<div class="cat-row">' +
+      '<div class="cat-main"><b>' + esc(p.name) + '</b>' +
+      (p.description ? '<div class="muted">' + esc(p.description) + '</div>' : '') +
+      (p.author ? '<div class="muted" style="font-size:11.5px">by ' + esc(p.author) + '</div>' : '') +
+      (p.requires ? '<div class="muted" style="font-size:11.5px">Requires: ' + esc(p.requires) + '</div>' : '') +
+      '</div>' +
+      '<div class="cat-meta">' +
+      '<span class="pill ' + (p.parser ? 'info">' + esc(p.parser) : 'disabled">no parser') + '</span>' +
+      (inputs ? '<div class="chips">' + inputs + '</div>' : '') +
+      (tags ? '<div class="chips">' + tags + '</div>' : '') +
+      '</div>' +
+      '<div class="cat-actions">' +
+      (installed ? '<span class="pill disabled">installed</span>' : '') +
+      '<button class="btn sm primary" data-catimp="' + esc(p.url) + '" data-catname="' + esc(p.name) + '">Import</button>' +
+      '</div></div>';
+  }
+  function pgCatalogLoad(source, installedNames, resultsEl, footEl) {
+    resultsEl.innerHTML = '<p class="muted">Loading…</p>';
+    footEl.innerHTML = '';
+    api('/api/plugins/catalog?source=' + encodeURIComponent(source)).then(function (r) {
+      var plugins = r.plugins || [];
+      resultsEl.innerHTML = plugins.length
+        ? '<div class="cat-grid">' + plugins.map(function (p) { return pgCatalogRow(p, installedNames); }).join('') + '</div>'
+        : '<p class="empty">No plugins found in this catalog.</p>';
+      var bits = [];
+      if (r.kind) bits.push('kind: ' + esc(r.kind));
+      if (r.updated) bits.push('updated: ' + esc(r.updated));
+      bits.push('source: ' + esc(r.source || source));
+      footEl.innerHTML = '<p class="muted cat-foot">' + bits.join(' · ') + '</p>';
+      resultsEl.querySelectorAll('[data-catimp]').forEach(function (b) {
+        b.onclick = function () {
+          b.disabled = true;
+          api('/api/plugins/catalog/import', { method: 'POST', body: { url: b.dataset.catimp } }).then(function (res) {
+            toast('Imported \'' + (res.name || b.dataset.catname) + '\' (disabled) — add secrets/URL, test, then enable', { level: 'ok' });
+            show('plugins/' + res.id);
+          }).catch(function (e) { b.disabled = false; toast(e.message, true); });
+        };
+      });
+    }).catch(function (e) {
+      if (e.status === 502) {
+        resultsEl.innerHTML = '<div class="notice-inline"><b>' + esc(e.message) + '</b>' +
+          (e.hint ? '<div>' + esc(e.hint) + '</div>' : '') + '</div>';
+      } else {
+        resultsEl.innerHTML = '<p class="bad">' + esc(e.message) + '</p>';
+      }
+    });
   }
 
   // ---- editor ----

@@ -49,6 +49,7 @@ export const SETTINGS_REGISTRY = [
   { key: 'retention_max_rows', type: 'int', default: 5000, min: 100, max: 1000000, group: 'Logs & retention', label: 'Max rows per log table', help: 'Hard cap per table regardless of age; the oldest rows go first.' },
   // Plugins (used from 0.13)
   { key: 'plugin_leeway_hours', type: 'int', default: 24, min: 0, max: 720, group: 'Guest lookup plugins', label: 'Stay-window leeway (hours)', help: 'Guests may log in this many hours before check-in and after check-out.' },
+  { key: 'plugin_catalog_url', type: 'text', default: 'https://raw.githubusercontent.com/omegatron/tinkernet-tikspot/main/plugins/index.json', group: 'Guest lookup plugins', label: 'Plugin catalog URL', help: 'Where "Browse catalog" looks for community recipes: a catalog index.json, a GitHub folder URL (…/tree/main/plugins) or a raw/blob URL. The container needs outbound internet to fetch it.' },
   // Router
   { key: 'hotspot_profiles', type: 'json', default: null, group: 'Router', label: 'Hotspot profiles to manage', help: 'JSON array of hotspot profile names Auto-configure should point at RADIUS, e.g. ["hsprof1"]. Leave empty to manage every profile.' },
   // Health

@@ -139,6 +139,19 @@ cd app && npm test      # node --test
 release workflow, which builds the multi-arch image and publishes it to
 `ghcr.io/omegatron/tinkernet-tikspot` for the RouterOS App deploy below.
 
+## Plugins
+
+Guest-lookup **plugins** are portable JSON recipes that let guests log in with details
+your own system already holds (room + surname, booking reference, mobile, email…). The
+[`plugins/`](plugins/) folder is the community catalog: the admin's **Guest lookup →
+Browse catalog** reads its `index.json` and imports a recipe in one click (disabled and
+without secrets until you review it). Point *Settings → Plugin catalog URL* at any
+GitHub folder, `index.json` or single exported file to use your own catalog.
+
+- How recipes work: [`docs/guest-lookup-plugins.md`](docs/guest-lookup-plugins.md)
+- Try it with the bundled demo guest API: [`examples/guest-api/`](examples/guest-api/)
+- Contribute one: [`plugins/README.md`](plugins/README.md)
+
 ## Deploying to a MikroTik
 
 Two paths, depending on RouterOS version:

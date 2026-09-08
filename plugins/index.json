@@ -1,0 +1,64 @@
+{
+  "format": "tikspot-plugin-catalog",
+  "version": 1,
+  "updated": "2026-09-08",
+  "plugins": [
+    {
+      "id": "demo-hotel-json",
+      "name": "Hotel Guest System (JSON, token auth)",
+      "description": "Demo hotel guest system over JSON with a username/password token login. Matches room number + guest name; stay window from checkIn/checkOut.",
+      "author": "Tikspot",
+      "file": "demo-hotel-json.json",
+      "tags": [
+        "demo",
+        "hotel",
+        "json",
+        "token-auth"
+      ],
+      "requires": "examples/guest-api demo server (edit the URL to your host)",
+      "parser": "json",
+      "inputs": [
+        "room",
+        "name"
+      ]
+    },
+    {
+      "id": "demo-hotel-xml",
+      "name": "Hotel Guest System (XML, API key)",
+      "description": "Same demo guest system, XML response with an X-Api-Key header. Shows the XML parser and attribute/element paths.",
+      "author": "Tikspot",
+      "file": "demo-hotel-xml.json",
+      "tags": [
+        "demo",
+        "hotel",
+        "xml",
+        "api-key"
+      ],
+      "requires": "examples/guest-api demo server (edit the URL to your host)",
+      "parser": "xml",
+      "inputs": [
+        "room",
+        "name"
+      ]
+    },
+    {
+      "id": "demo-hotel-regex",
+      "name": "Hotel Guest System (plain text, API key)",
+      "description": "Same demo guest system, plain-text response parsed with a named-group regex (one record per line).",
+      "author": "Tikspot",
+      "file": "demo-hotel-regex.json",
+      "tags": [
+        "demo",
+        "hotel",
+        "regex",
+        "text"
+      ],
+      "requires": "examples/guest-api demo server (edit the URL to your host)",
+      "parser": "regex",
+      "inputs": [
+        "room",
+        "name"
+      ]
+    }
+  ]
+}

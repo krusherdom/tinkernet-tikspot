@@ -55,6 +55,16 @@ page. Remember the container needs **outbound access** to your API — a masquer
 the container subnet on the router (Verify flags a missing one) and a reachable URL. The
 System tab's *egress check* can confirm this.
 
+## Browsing the catalog
+
+**Guest lookup → Browse catalog** lists recipes published in the repo's
+[`plugins/`](../plugins/) folder (or wherever *Settings → Plugin catalog URL* points: an
+`index.json`, a GitHub folder URL like `https://github.com/you/repo/tree/main/plugins`,
+or a single exported file). **Import** creates the plugin *disabled* with empty secrets;
+open it, set the real host and credentials, run **Test lookup**, then enable it. The
+container fetches the catalog itself, so it needs outbound internet (the masquerade rule
+Verify checks) and DNS. To share a recipe, export it and follow `plugins/README.md`.
+
 ## Trying it without a real guest system
 
 `examples/guest-api/` is a zero-dependency demo API with sample guests and three ready
