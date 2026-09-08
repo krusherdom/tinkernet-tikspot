@@ -1,6 +1,22 @@
 // First-run setup wizard backend + router settings + MAC-session views.
 
 import { randomBytes } from 'node:crypto';
+import os from 'node:os';
+
+// First non-loopback IPv4 of this process — inside the container that is its
+// veth address on the router bridge (the value the router must be told).
+export function detectContainerIp() {
+  try {
+    for (const list of Object.values(os.networkInterfaces())) {
+      for (const a of list || []) {
+        if (a.family === 'IPv4' && !a.internal) return a.address;
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
 import { getSetting, setSetting, getBool, getJSON } from '../db/settings.js';
 import { hashPassword } from './auth.js';
 import { RouterOS, autoConfigure, verifyConfig, listManaged, isPermissionError } from '../mikrotik/rest.js';
@@ -45,6 +61,9 @@ export default async function setupRoutes(app) {
     setup_complete: getBool(db, 'setup_complete', false),
     has_admin: !!getSetting(db, 'admin_password_hash', null),
     has_nas_secret: Boolean(getSetting(db, 'nas_secret', null)),
+    // The container's own IPv4 on the router bridge — the wizard prefills the
+    // Container IP field with it so the operator doesn't guess a neighbour's.
+    detected_ip: detectContainerIp(),
     router: {
       scheme: getSetting(db, 'router_scheme', 'https'),
       host: getSetting(db, 'router_host', ''),

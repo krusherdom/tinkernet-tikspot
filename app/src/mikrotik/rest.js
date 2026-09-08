@@ -228,16 +228,29 @@ export async function configureHotspotProfile(
   if (Array.isArray(profiles) && profiles.length && !wanted.length) {
     throw new Error(`no hotspot profile matched ${profiles.join(', ')}`);
   }
+  // NOTE: /ip/hotspot/profile has NO comment field (RouterOS rejects it with
+  // "unknown parameter comment" — confirmed on 7.23), so profiles can't carry the
+  // managed marker; they're identified by name / use-radius instead.
   const results = [];
   for (const p of wanted) {
     await router.patch('/ip/hotspot/profile', p['.id'], {
       'use-radius': 'yes',
       'login-by': loginBy,
-      comment: mergeComment(p.comment),
     });
     results.push(p.name);
   }
   return { profiles: results, detail: results.length ? `use-radius on: ${results.join(', ')}` : 'no hotspot profiles found' };
+}
+
+// Hotspot clients use the router as their resolver; without this the static
+// server-name entry is never served to them. Single settings object (PATCH).
+export async function ensureDnsRemoteRequests(router) {
+  const cur = await router.list('/ip/dns');
+  const obj = Array.isArray(cur) ? cur[0] ?? {} : cur ?? {};
+  const v = obj['allow-remote-requests'];
+  if (v === 'yes' || v === 'true' || v === true) return { detail: 'already enabled' };
+  await router.call('PATCH', '/ip/dns', { 'allow-remote-requests': 'yes' });
+  return { updated: true, detail: 'allow-remote-requests=yes' };
 }
 
 export async function ensureDnsStatic(router, { name, address }) {
@@ -294,8 +307,13 @@ export async function listManaged(router) {
   const out = {};
   for (const { key, menu, fields } of MANAGED_MENUS) {
     const r = await readMenu(router, menu);
+    // Hotspot profiles can't carry the managed comment (no such field), so the
+    // ones pointed at RADIUS are what Tikspot "manages" there.
+    const mine = key === 'hotspot-profile'
+      ? (e) => e['use-radius'] === 'yes' || e['use-radius'] === 'true' || e['use-radius'] === true
+      : isManaged;
     out[key] = r.ok
-      ? { ok: true, rows: r.rows.filter(isManaged).map((e) => summarize(e, fields)) }
+      ? { ok: true, rows: r.rows.filter(mine).map((e) => summarize(e, fields)) }
       : { ok: false, error: r.error, rows: [] };
   }
   return out;
@@ -319,6 +337,7 @@ export async function autoConfigure(router, { containerIp, nasSecret, serverHost
     { step: 'radius-incoming', run: () => ensureRadiusIncoming(router, {}) },
     { step: 'hotspot-profile', run: () => configureHotspotProfile(router, { profiles }) },
     ...(host ? [{ step: 'dns-static', run: () => ensureDnsStatic(router, { name: host, address: containerIp }) }] : []),
+    ...(host ? [{ step: 'dns-remote-requests', run: () => ensureDnsRemoteRequests(router) }] : []),
     { step: 'walled-garden', run: () => ensureWalledGarden(router, { address: containerIp, host }) },
   ];
 
@@ -550,13 +569,20 @@ export async function verifyConfig(router, { containerIp, serverHost } = {}) {
     const o = { required: false, docs: 'masquerade', hint: 'Without a srcnat masquerade rule the container has no outbound internet (guest-lookup plugins and the egress check fail).' };
     if (!nat.ok) checks.push(unknown(c, nat, o));
     else {
-      const rule = nat.rows.find(
-        (r) => r.chain === 'srcnat' && r.action === 'masquerade' && !yes(r.disabled) &&
-          (!r['src-address'] || cidrCovers(r['src-address'], containerIp)),
-      );
-      checks.push(mk(c, rule ? 'pass' : 'fail', {
+      const masq = nat.rows.filter((r) => r.chain === 'srcnat' && r.action === 'masquerade' && !yes(r.disabled));
+      // Prefer a rule whose src-address explicitly covers the container; a rule
+      // with no src-address can't be judged (it may be pinned to another
+      // out-interface), so it is reported as "unknown", never as a pass.
+      const rule = masq.find((r) => r['src-address'] && cidrCovers(r['src-address'], containerIp));
+      const vague = !rule && masq.find((r) => !r['src-address']);
+      const status = rule ? 'pass' : vague ? 'unknown' : 'fail';
+      checks.push(mk(c, status, {
         ...o,
-        detail: rule ? '' : `no enabled srcnat masquerade rule covers ${containerIp || 'the container'} — outbound internet from the container will not work`,
+        detail: rule
+          ? ''
+          : vague
+            ? `a masquerade rule without src-address exists (${fmt('', vague, ['out-interface', 'comment']).trim()}) — cannot confirm it covers ${containerIp || 'the container'}`
+            : `no enabled srcnat masquerade rule covers ${containerIp || 'the container'} — outbound internet from the container will not work`,
         raw: rule ? fmt('/ip/firewall/nat', rule, ['chain', 'action', 'src-address', 'out-interface']) : '',
       }));
     }

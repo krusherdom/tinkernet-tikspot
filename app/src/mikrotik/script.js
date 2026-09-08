@@ -53,7 +53,8 @@ export function buildSetupScript({ containerIp, serverHost, nasSecret }) {
 
   // Every hotspot profile -> use RADIUS (mirrors autoConfigure, which patches all).
   s += '# Point every hotspot profile at RADIUS:\n';
-  s += `/ip/hotspot/profile set [find] use-radius=yes login-by="mac-cookie,http-chap,http-pap,mac" comment=${q(cmt)}\n`;
+  // (hotspot profiles have no comment field — do not add one.)
+  s += `/ip/hotspot/profile set [find] use-radius=yes login-by="mac-cookie,http-chap,http-pap,mac"\n`;
   s += ':put "Tikspot hotspot profiles: use-radius enabled"\n\n';
 
   // Walled-garden IP so pre-login clients can reach the container.
@@ -67,6 +68,10 @@ export function buildSetupScript({ containerIp, serverHost, nasSecret }) {
   s += '\n';
 
   if (useHostname) {
+    // Clients must be able to use the router as their resolver.
+    s += '# Let hotspot clients resolve names through the router:\n';
+    s += '/ip/dns set allow-remote-requests=yes\n';
+    s += ':put "Tikspot DNS: allow-remote-requests=yes"\n\n';
     // DNS static so clients resolve the server-name to the container.
     s += block(
       'DNS static',

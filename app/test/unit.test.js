@@ -356,3 +356,52 @@ test('autoConfigure marks the router unreachable and skips remaining steps on a 
   assert.equal(result.unreachable, true);
   assert.equal(result.ok, false);
 });
+
+// --- hardware findings from the test RB5009 (RouterOS 7.23), 2026-09-08 ---------
+import { configureHotspotProfile, ensureDnsRemoteRequests, verifyConfig as verifyCfg2 } from '../src/mikrotik/rest.js';
+import { matchPlacement } from '../src/mikrotik/placement.js';
+
+function stubRouter(menus, calls) {
+  return {
+    list: async (menu) => menus[menu] ?? [],
+    add: async (menu, obj) => { calls.push(['add', menu, obj]); return { '.id': '*9' }; },
+    patch: async (menu, id, obj) => { calls.push(['patch', menu, id, obj]); return {}; },
+    call: async (method, path, body) => { calls.push([method, path, body]); return { status: 'finished' }; },
+  };
+}
+
+test('hotspot profile PATCH never sends a comment (RouterOS has no such field)', async () => {
+  const calls = [];
+  const r = stubRouter({ '/ip/hotspot/profile': [{ '.id': '*0', name: 'default', 'use-radius': 'false', 'login-by': 'cookie,http-chap' }] }, calls);
+  const res = await configureHotspotProfile(r, {});
+  assert.deepEqual(res.profiles, ['default']);
+  const patch = calls.find((c) => c[0] === 'patch');
+  assert.equal(patch[1], '/ip/hotspot/profile');
+  assert.equal('comment' in patch[3], false);
+  assert.equal(patch[3]['use-radius'], 'yes');
+});
+
+test('ensureDnsRemoteRequests patches the single /ip/dns object only when off', async () => {
+  const calls = [];
+  const off = stubRouter({ '/ip/dns': [{ 'allow-remote-requests': 'false' }] }, calls);
+  assert.equal((await ensureDnsRemoteRequests(off)).updated, true);
+  assert.deepEqual(calls[0], ['PATCH', '/ip/dns', { 'allow-remote-requests': 'yes' }]);
+  const on = stubRouter({ '/ip/dns': [{ 'allow-remote-requests': 'true' }] }, []);
+  assert.equal((await ensureDnsRemoteRequests(on)).updated, undefined);
+});
+
+test('masquerade check: empty src-address is unknown, covering rule is pass', async () => {
+  const base = { '/radius': [], '/radius/incoming': [{}], '/ip/hotspot/profile': [], '/ip/hotspot': [], '/ip/dns/static': [], '/ip/dns': [{}], '/ip/hotspot/walled-garden/ip': [], '/ip/hotspot/walled-garden': [], '/container': [], '/interface/veth': [], '/ip/address': [] };
+  const vague = stubRouter({ ...base, '/ip/firewall/nat': [{ chain: 'srcnat', action: 'masquerade', 'out-interface': 'test-bridge' }] }, []);
+  let c = (await verifyCfg2(vague, { containerIp: '172.18.5.6' })).checks.find((x) => x.component.startsWith('Masquerade'));
+  assert.equal(c.status, 'unknown');
+  const good = stubRouter({ ...base, '/ip/firewall/nat': [{ chain: 'srcnat', action: 'masquerade', 'out-interface': 'x' }, { chain: 'srcnat', action: 'masquerade', 'src-address': '172.18.5.0/24' }] }, []);
+  c = (await verifyCfg2(good, { containerIp: '172.18.5.6' })).checks.find((x) => x.component.startsWith('Masquerade'));
+  assert.equal(c.status, 'pass');
+});
+
+test('matchPlacement derives status from RouterOS 7.23 running=true', () => {
+  const pl = matchPlacement('172.18.5.6', [{ name: 'app-tikspot', interface: 'veth-tikspot', running: 'true', 'start-on-boot': 'true' }], [{ name: 'veth-tikspot', address: '172.18.5.6/24' }], []);
+  assert.equal(pl.container.status, 'running');
+  assert.equal(pl.container.startOnBoot, 'true');
+});

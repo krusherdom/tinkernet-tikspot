@@ -263,7 +263,8 @@
       fieldH('r-user', 'API user', '<input id="r-user" value="' + esc(s.username || 'admin') + '">', 'Use a <code>full</code> user for setup, then <code>/user set [find name=X] group=read</code>.') +
       field('r-pass', 'API password', '<input id="r-pass" type="password" placeholder="(unchanged)">') +
       '</div><div class="row" style="margin-top:10px">' +
-      fieldH('r-cip', 'Container IP', '<input id="r-cip" value="' + esc(s.container_ip || '') + '" placeholder="172.18.0.2">', 'This container\'s own address on the router\'s bridge.') +
+      fieldH('r-cip', 'Container IP', '<input id="r-cip" value="' + esc(s.container_ip || st.detected_ip || '') + '" placeholder="' + esc(st.detected_ip || '172.18.0.2') + '">',
+        'This container\'s own address on the router\'s bridge.' + (st.detected_ip ? ' Detected from inside the container: <code>' + esc(st.detected_ip) + '</code>' + (s.container_ip && s.container_ip !== st.detected_ip ? ' — <b>differs from the saved value</b>.' : '.') : '')) +
       fieldH('r-sn', 'Hotspot server-name', '<input id="r-sn" value="' + esc(s.server_name || '') + '" placeholder="hotspot.tikspot">', '<code>host|label</code> format — never a <code>.local</code> name.') +
       '<div class="field"><label for="r-sec">RADIUS secret</label><div class="row" style="gap:8px;align-items:center;flex-wrap:nowrap">' +
       '<input id="r-sec" placeholder="shared secret" style="flex:1;min-width:0">' +

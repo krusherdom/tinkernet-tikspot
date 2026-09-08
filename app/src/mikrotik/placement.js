@@ -25,7 +25,15 @@ export function matchPlacement(ip, containers, veths, addrs) {
     container: container
       ? {
           name: container.name,
-          status: container.status,
+          // RouterOS 7.23 REST exposes `running=true|false` (no `status` field);
+          // older builds had `status`. Normalise to a status string.
+          status:
+            container.status ??
+            (container.running === 'true' || container.running === true
+              ? 'running'
+              : container.running === 'false' || container.running === false
+                ? 'stopped'
+                : undefined),
           rootDir: container['root-dir'],
           mounts: container.mount || container.mounts || '',
           interface: container.interface,
