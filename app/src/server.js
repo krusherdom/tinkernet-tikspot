@@ -82,6 +82,9 @@ await app.register(fastifyStatic, {
   decorateReply: false,
 });
 
+// The admin shell is static under /admin/; make the bare path work too.
+app.get('/admin', async (_req, reply) => reply.redirect('/admin/', 302));
+
 // Health + status. /healthz actually touches the DB so a broken SQLite file
 // shows up here (the router's /tool/fetch triage step) instead of staying green.
 app.get('/healthz', async (_req, reply) => {
