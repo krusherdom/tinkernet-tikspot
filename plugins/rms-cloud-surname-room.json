@@ -77,9 +77,6 @@
       "contentType": "json",
       "accept": "json",
       "bodyJson": {
-        "guestSurname": [
-          "{{input.name}}"
-        ],
         "areaNameLike": "{{input.room}}",
         "listOfStatus": [
           "arrived",

@@ -192,7 +192,7 @@ test('parseDate handles iso, dmy, mdy, ymd, epoch(seconds/ms), and invalid input
 
 test('normalize: trim/name/phone/digits/email/upper', () => {
   assert.equal(normalize('  Room 5  ', 'trim'), 'Room 5');
-  assert.equal(normalize("José  O'Brien-Smith", 'name'), 'jose obriensmith');
+  assert.equal(normalize("José  O'Brien-Smith", 'name'), 'jose obrien smith');
   assert.equal(normalize('+44 (0) 7700-900123', 'phone'), '4407700900123');
   assert.equal(normalize('+44 (0) 7700-900123', 'digits'), '4407700900123');
   assert.equal(normalize('  Foo@BAR.com ', 'email'), 'foo@bar.com');
