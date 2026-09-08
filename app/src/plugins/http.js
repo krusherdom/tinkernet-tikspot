@@ -37,6 +37,10 @@ function doRequest({ url, method = 'GET', headers = {}, body, timeoutMs = 8000, 
       reject(makeError(`invalid URL: ${url}`, 'NETWORK'));
       return;
     }
+    if (target.protocol !== 'http:' && target.protocol !== 'https:') {
+      reject(makeError(`unsupported URL scheme: ${target.protocol}`, 'NETWORK'));
+      return;
+    }
 
     const mod = target.protocol === 'https:' ? https : http;
     const data = toBuffer(body);

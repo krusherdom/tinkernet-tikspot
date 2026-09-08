@@ -82,7 +82,9 @@ function isPlainObject(v) {
 function isHttpUrl(v) {
   if (typeof v !== 'string') return false;
   const s = v.trim();
-  return /^https?:\/\/\S+/i.test(s) || /^\{\{\s*[a-zA-Z0-9_.[\]]+\s*\}\}/.test(s);
+  // Only operator params may supply the origin — never guest input or
+  // response data.
+  return /^https?:\/\/\S+/i.test(s) || /^\{\{\s*param\.[a-zA-Z0-9_]+\s*\}\}/.test(s);
 }
 
 function inRange(n, lo, hi) {
@@ -313,7 +315,13 @@ export function validateRecipe(obj) {
         const label = typeof def.label === 'string' && def.label.trim() ? def.label.trim().slice(0, 80) : name;
         const entry = { label, type };
         if (typeof def.help === 'string' && def.help.trim()) entry.help = def.help.trim().slice(0, 300);
-        if (def.default !== undefined) entry.default = def.default;
+        if (def.default !== undefined && def.default !== null && def.default !== '') {
+          // Coerce the declared default by type so a form round-trip (which
+          // posts strings) doesn't turn `false` into "false".
+          if (type === 'boolean') entry.default = def.default === true || String(def.default).toLowerCase() === 'true' || def.default === 1 || def.default === '1';
+          else if (type === 'number') { const n = Number(def.default); if (Number.isFinite(n)) entry.default = n; }
+          else entry.default = def.default;
+        }
         if (type === 'select') {
           const options = Array.isArray(def.options)
             ? def.options

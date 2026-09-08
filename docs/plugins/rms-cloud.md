@@ -123,6 +123,30 @@ TLS, port 8091), then in the imported recipe:
 See `examples/rms-mock/README.md` for sample rooms/guests to try. Set the base URL back
 to a real region before pointing the recipe at your actual RMS Cloud account.
 
+## Guest contacts (`getGuestContacts`)
+
+The recipes read email and mobile from `GET /guests/{id}` — the primary guest record
+carries them and it is one request per reservation. `GET /guests/{id}/contacts`
+(`getGuestContacts`) returns the *additional* contacts on a guest profile (partner,
+company contact, emergency contact), each with `given`, `surname`, `email`, `mobile` and
+`contactType`. If you want those people to be able to log in too, add a third step to
+the "room + any guest detail" recipe that fills any still-empty fields from the first
+extra contact:
+
+```json
+{
+  "name": "contacts",
+  "forEach": "reservations",
+  "optional": true,
+  "request": { "method": "GET", "url": "{{param.baseUrl}}/guests/{{record.guestId}}/contacts", "accept": "json" },
+  "parse": { "type": "json", "root": "", "fields": { "contactEmail": "email", "contactMobile": "mobile" } }
+}
+```
+
+then add `contactEmail` / `contactMobile` to the `anyOf` list of the email and mobile
+match rules. Keep `maxFanOut` in mind: each extra step is one more request per
+reservation in the room. The bundled mock serves this endpoint.
+
 ## Area naming
 
 RMS's `areaName` is whatever your property calls that room/site — `"101"`, `"Villa 7"`,

@@ -577,3 +577,21 @@ test('url templates insert param values verbatim but still escape guest input', 
   const out = renderTemplate('{{param.baseUrl}}/rooms/{{input.room}}', vars, { escape: 'url' });
   assert.equal(out, 'http://10.0.0.5:8091/rooms/a%20b%2Fc');
 });
+
+test('only param placeholders may lead a URL; guest input cannot supply the origin', () => {
+  const base = { ...emptyRecipe(), name: 'u', inputs: [{ name: 'room', required: true }], match: { rules: [{ input: 'room', field: 'room' }] }, parse: { type: 'json', fields: { room: 'room' } } };
+  const okP = validateRecipe({ ...base, params: { baseUrl: { type: 'text', default: 'https://x' } }, request: { url: '{{param.baseUrl}}/a' } });
+  assert.equal(okP.ok, true);
+  const badI = validateRecipe({ ...base, request: { url: '{{input.room}}/a' } });
+  assert.equal(badI.ok, false);
+  assert.ok(badI.fields['request.url']);
+});
+
+test('declared param defaults are coerced by type', () => {
+  const base = { ...emptyRecipe(), name: 'd', inputs: [{ name: 'room', required: true }], match: { rules: [{ input: 'room', field: 'room' }] }, parse: { type: 'json', fields: { room: 'room' } }, request: { url: 'http://x/' } };
+  const v = validateRecipe({ ...base, params: { t: { type: 'boolean', default: 'false' }, n: { type: 'number', default: '7' } } });
+  assert.equal(v.ok, true);
+  assert.equal(v.value.params.t.default, false);
+  assert.equal(v.value.params.n.default, 7);
+  assert.equal(v.value.paramValues.t, false);
+});
