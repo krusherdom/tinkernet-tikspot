@@ -8,7 +8,7 @@ import { renderPortalPage } from './render.js';
 import { activeModel } from './designs.js';
 import { getSetting, getTyped, getJSON } from '../db/settings.js';
 import { activeAnnouncements } from '../admin/announcements.js';
-import { listPlugins, getPlugin } from '../plugins/store.js';
+import { listPlugins, getPlugin, listRows } from '../plugins/store.js';
 import { grantGuest } from '../plugins/grants.js';
 import { runLookup, makeTokenCache } from '../plugins/engine.js';
 import { makeRateLimiter, clientIp } from '../admin/ratelimit.js';
@@ -137,9 +137,14 @@ export default async function portalRoutes(app) {
       return renderError('Please fill in all the required fields.');
     }
 
+    // source:'list' recipes have no HTTP request to run — the engine matches
+    // directly against the plugin's stored guest-list rows (uploaded via the
+    // admin's Guest list card — see app/src/admin/plugins.js).
+    const records = recipe.source === 'list' ? listRows(db, id).rows : undefined;
+
     let result;
     try {
-      result = await runLookup({ recipe, inputs, tokenCache: lookupTokenCache });
+      result = await runLookup({ recipe, inputs, tokenCache: lookupTokenCache, records });
     } catch (err) {
       logEvent(db, 'error', 'plugin', `Lookup threw for plugin ${recipe.name}`, {
         plugin: id,

@@ -1,7 +1,7 @@
 {
   "format": "tikspot-plugin-catalog",
   "version": 1,
-  "updated": "2026-09-08",
+  "updated": "2026-09-09",
   "plugins": [
     {
       "id": "demo-hotel-json",
@@ -17,6 +17,7 @@
       ],
       "requires": "examples/guest-api demo server (edit the URL to your host)",
       "parser": "json",
+      "verified": "mock",
       "inputs": [
         "room",
         "name"
@@ -36,6 +37,7 @@
       ],
       "requires": "examples/guest-api demo server (edit the URL to your host)",
       "parser": "xml",
+      "verified": "mock",
       "inputs": [
         "room",
         "name"
@@ -55,6 +57,7 @@
       ],
       "requires": "examples/guest-api demo server (edit the URL to your host)",
       "parser": "regex",
+      "verified": "mock",
       "inputs": [
         "room",
         "name"
@@ -75,6 +78,7 @@
       ],
       "requires": "RMS Cloud API access: agent ID + agent password (from RMS), and a client ID + \"Web Service password\" (from the property). See docs/plugins/rms-cloud.md.",
       "parser": "json",
+      "verified": "mock",
       "inputs": [
         "room",
         "name"
@@ -96,12 +100,127 @@
       ],
       "requires": "RMS Cloud API access: agent ID + agent password (from RMS), and a client ID + \"Web Service password\" (from the property). See docs/plugins/rms-cloud.md.",
       "parser": "json",
+      "verified": "mock",
       "inputs": [
         "room",
         "last_name",
         "first_name",
         "email",
         "mobile"
+      ]
+    },
+    {
+      "id": "mews-connector",
+      "name": "Mews Connector API",
+      "description": "Mews (mews.com) via its Connector API. Every request carries a client + access token pair (no separate login step); a multi-step lookup finds the resource by room, then current reservations, then each guest's contact details.",
+      "author": "Tikspot",
+      "file": "mews-connector.json",
+      "tags": [
+        "mews",
+        "hotel",
+        "pms",
+        "json",
+        "multi-step"
+      ],
+      "requires": "Mews Connector API access: a Client token (from Mews) and an Access token (from the property). See docs/plugins/mews.md.",
+      "parser": "json",
+      "verified": "live",
+      "inputs": [
+        "room",
+        "last_name",
+        "first_name",
+        "email",
+        "mobile"
+      ]
+    },
+    {
+      "id": "apaleo",
+      "name": "Apaleo",
+      "description": "Apaleo (apaleo.com) via its Booking API. OAuth2 client-credentials login with HTTP Basic auth, then a single reservations search filtered by property, status and stay dates.",
+      "author": "Tikspot",
+      "file": "apaleo.json",
+      "tags": [
+        "apaleo",
+        "hotel",
+        "pms",
+        "json",
+        "oauth2"
+      ],
+      "requires": "An Apaleo developer account with a client ID + client secret, and the property code. See docs/plugins/apaleo.md.",
+      "parser": "json",
+      "verified": "mock",
+      "inputs": [
+        "room",
+        "last_name",
+        "first_name",
+        "email",
+        "mobile"
+      ]
+    },
+    {
+      "id": "cloudbeds",
+      "name": "Cloudbeds",
+      "description": "Cloudbeds (cloudbeds.com) via its REST API. A static API key on every request, filtered to checked-in reservations for a room; matches any guest sharing that room, not just the primary guest.",
+      "author": "Tikspot",
+      "file": "cloudbeds.json",
+      "tags": [
+        "cloudbeds",
+        "hotel",
+        "pms",
+        "json",
+        "api-key"
+      ],
+      "requires": "A Cloudbeds API key and property ID (Cloudbeds partner/developer sandbox, or a live property with API access enabled). See docs/plugins/cloudbeds.md.",
+      "parser": "json",
+      "verified": "mock",
+      "inputs": [
+        "room",
+        "last_name",
+        "first_name",
+        "email",
+        "mobile"
+      ]
+    },
+    {
+      "id": "csv-url",
+      "name": "CSV / Google Sheet guest list",
+      "description": "Any CSV over HTTP — a Google Sheet published to web as CSV, or any URL serving text/csv. No login system required; ideal for a spreadsheet a front desk already keeps.",
+      "author": "Tikspot",
+      "file": "csv-url.json",
+      "tags": [
+        "csv",
+        "google-sheets",
+        "no-auth"
+      ],
+      "requires": "A CSV URL reachable without login (a Google Sheet published to web works). See docs/plugins/csv-and-guest-list.md.",
+      "parser": "csv",
+      "verified": "mock",
+      "inputs": [
+        "room",
+        "last_name",
+        "email",
+        "mobile"
+      ]
+    },
+    {
+      "id": "eventbrite",
+      "name": "Eventbrite attendees",
+      "description": "Eventbrite (eventbrite.com) via its v3 API. Checks an attendee's email + last name against one event's attendee list, paginating through every page; the event's own start/end time bounds the Wi-Fi window.",
+      "author": "Tikspot",
+      "file": "eventbrite.json",
+      "tags": [
+        "eventbrite",
+        "event",
+        "json",
+        "token-auth",
+        "multi-step"
+      ],
+      "requires": "An Eventbrite private token and the numeric event ID. See docs/plugins/eventbrite.md.",
+      "parser": "json",
+      "verified": "mock",
+      "inputs": [
+        "email",
+        "last_name"
       ]
     }
   ]

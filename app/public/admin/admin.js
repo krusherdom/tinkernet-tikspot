@@ -1081,20 +1081,28 @@
       timeoutMs: r.timeoutMs == null ? '' : String(r.timeoutMs),
       allowInsecureTls: !!r.allowInsecureTls,
       maxRecords: r.maxRecords == null ? '' : String(r.maxRecords),
+      source: r.source === 'list' ? 'list' : 'http',
       authOn: !!r.auth,
       auth: {
         method: a.method || 'POST', url: a.url || '', contentType: a.contentType || 'json',
         bodyTemplate: a.bodyTemplate || '', tokenPath: a.tokenPath || 'token',
         tokenTtlSecs: a.tokenTtlSecs == null ? '' : String(a.tokenTtlSecs),
         placement: { in: pl.in || 'header', name: pl.name || 'Authorization', prefix: pl.prefix == null ? 'Bearer ' : pl.prefix },
+        basicOn: !!a.basic,
+        basic: { user: (a.basic && a.basic.user) || '{{secret.username}}', pass: (a.basic && a.basic.pass) || '{{secret.password}}' },
       },
       authHeaderRows: pgRows(a.headers),
       request: {
         method: rq.method || 'GET', url: rq.url || '', contentType: rq.contentType || 'json',
         accept: rq.accept || '', bodyTemplate: rq.bodyTemplate || '',
+        basicOn: !!rq.basic,
+        basic: { user: (rq.basic && rq.basic.user) || '{{secret.username}}', pass: (rq.basic && rq.basic.pass) || '{{secret.password}}' },
       },
       headerRows: pgRows(rq.headers),
-      parse: { type: ps.type || 'json', root: ps.root || '', recordRegex: ps.recordRegex || '', dateFormat: ps.dateFormat || 'iso' },
+      parse: {
+        type: ps.type || 'json', root: ps.root || '', recordRegex: ps.recordRegex || '', dateFormat: ps.dateFormat || 'iso',
+        delimiter: ps.delimiter || ',', header: ps.header !== false,
+      },
       fieldRows: Object.keys(ps.fields || {}).map(function (k) { return { key: k, path: String(ps.fields[k] == null ? '' : ps.fields[k]) }; }),
       match: {
         all: mt.all !== false,
@@ -1136,29 +1144,53 @@
     if (d.timeoutMs !== '') r.timeoutMs = pgNum(d.timeoutMs, 8000); else delete r.timeoutMs;
     r.allowInsecureTls = !!d.allowInsecureTls;
     if (d.maxRecords !== '') r.maxRecords = pgNum(d.maxRecords, 200); else delete r.maxRecords;
-    if (d.authOn) {
-      r.auth = Object.assign({}, r.auth, {
-        method: d.auth.method, url: d.auth.url, headers: pgRowsToObj(d.authHeaderRows),
-        contentType: d.auth.contentType, bodyTemplate: d.auth.bodyTemplate, tokenPath: d.auth.tokenPath,
-        placement: { in: d.auth.placement.in, name: d.auth.placement.name, prefix: d.auth.placement.prefix },
-      });
-      if (d.auth.tokenTtlSecs !== '') r.auth.tokenTtlSecs = pgNum(d.auth.tokenTtlSecs, 3600); else delete r.auth.tokenTtlSecs;
+    if (d.source === 'list') {
+      r.source = 'list';
+      // source:'list' forbids request/auth/steps entirely — the guided form
+      // doesn't manage them so make sure a plugin switched to 'list' drops
+      // whatever _orig carried over from before the switch.
+      delete r.auth; delete r.request; delete r.steps;
+      var listFields = {};
+      d.fieldRows.forEach(function (f) { if (String(f.key).trim()) listFields[String(f.key).trim()] = f.path; });
+      r.parse = {};
+      if (Object.keys(listFields).length) r.parse.fields = listFields;
+      if (d.parse.dateFormat && d.parse.dateFormat !== 'iso') r.parse.dateFormat = d.parse.dateFormat;
+      if (!Object.keys(r.parse).length) delete r.parse;
+    } else {
+      delete r.source;
+      if (d.authOn) {
+        r.auth = Object.assign({}, r.auth, {
+          method: d.auth.method, url: d.auth.url, headers: pgRowsToObj(d.authHeaderRows),
+          contentType: d.auth.contentType, bodyTemplate: d.auth.bodyTemplate, tokenPath: d.auth.tokenPath,
+          placement: { in: d.auth.placement.in, name: d.auth.placement.name, prefix: d.auth.placement.prefix },
+        });
+        if (d.auth.tokenTtlSecs !== '') r.auth.tokenTtlSecs = pgNum(d.auth.tokenTtlSecs, 3600); else delete r.auth.tokenTtlSecs;
+        if (d.auth.basicOn) r.auth.basic = { user: d.auth.basic.user, pass: d.auth.basic.pass }; else delete r.auth.basic;
+      }
+      // authOn off: leave r.auth exactly as loaded (or absent for a new plugin) —
+      // an update that omits `auth` keeps the stored step; only Raw JSON's
+      // explicit `auth: null` clears it.
+      if (!d.hasSteps) {
+        r.request = Object.assign({}, r.request, {
+          method: d.request.method, url: d.request.url, headers: pgRowsToObj(d.headerRows),
+          contentType: d.request.contentType, bodyTemplate: d.request.bodyTemplate,
+        });
+        if (d.request.accept) r.request.accept = d.request.accept; else delete r.request.accept;
+        if (d.request.basicOn) r.request.basic = { user: d.request.basic.user, pass: d.request.basic.pass }; else delete r.request.basic;
+        var fields = {};
+        d.fieldRows.forEach(function (f) { if (String(f.key).trim()) fields[String(f.key).trim()] = f.path; });
+        r.parse = Object.assign({}, r.parse, { type: d.parse.type, root: d.parse.root, recordRegex: d.parse.recordRegex, fields: fields, dateFormat: d.parse.dateFormat });
+        if (d.parse.type === 'csv') {
+          r.parse.delimiter = d.parse.delimiter;
+          r.parse.header = !!d.parse.header;
+        } else {
+          delete r.parse.delimiter;
+          delete r.parse.header;
+        }
+      }
+      // hasSteps: the guided form doesn't touch request/parse/steps — they
+      // round-trip from _orig untouched (edit them in Raw JSON instead).
     }
-    // authOn off: leave r.auth exactly as loaded (or absent for a new plugin) —
-    // an update that omits `auth` keeps the stored step; only Raw JSON's
-    // explicit `auth: null` clears it.
-    if (!d.hasSteps) {
-      r.request = Object.assign({}, r.request, {
-        method: d.request.method, url: d.request.url, headers: pgRowsToObj(d.headerRows),
-        contentType: d.request.contentType, bodyTemplate: d.request.bodyTemplate,
-      });
-      if (d.request.accept) r.request.accept = d.request.accept; else delete r.request.accept;
-      var fields = {};
-      d.fieldRows.forEach(function (f) { if (String(f.key).trim()) fields[String(f.key).trim()] = f.path; });
-      r.parse = Object.assign({}, r.parse, { type: d.parse.type, root: d.parse.root, recordRegex: d.parse.recordRegex, fields: fields, dateFormat: d.parse.dateFormat });
-    }
-    // hasSteps: the guided form doesn't touch request/parse/steps — they
-    // round-trip from _orig untouched (edit them in Raw JSON instead).
     r.match = Object.assign({}, r.match, {
       all: !!d.match.all,
       rules: d.match.rules.map(function (ru) {
@@ -1394,6 +1426,7 @@
         raw: false, rawText: '',
         testInputs: {}, testResult: null, testRunning: false,
         errorSummary: null,
+        list: { info: null, error: null, loading: false },
       };
       pgRender();
     }).catch(function (e) { view.innerHTML = '<h1>Guest lookup</h1><p class="bad">' + esc(e.message) + '</p>'; });
@@ -1410,6 +1443,8 @@
     if (d.planGroup && !seen[d.planGroup]) groups.unshift([d.planGroup, d.planGroup + '  (no matching plan)']);
     return '<div class="card pg-sec"><h2>Basics</h2><div class="row pg-r">' +
       fieldH('pg-name', 'Name', pgTxt('name', d.name, ' id="pg-name" data-path="name" placeholder="Hotel guest system"'), 'Shown in this list and in the portal editor.') +
+      fieldH('pg-source', 'Source', pgSel('source', [['http', 'Guest system over HTTP'], ['list', 'Built-in guest list']], d.source, ' id="pg-source" data-restructure'),
+        'HTTP calls out to your guest system live; a built-in list is a CSV you upload here instead.') +
       fieldH('pg-plan', 'Plan group', pgSel('planGroup', groups, d.planGroup, ' id="pg-plan" data-path="planGroup"'), 'The RADIUS group a matched guest is put in — i.e. which plan\'s limits they get.') +
       fieldH('pg-timeout', 'Timeout (ms)', pgTxt('timeoutMs', d.timeoutMs, ' id="pg-timeout" type="number" min="1000" max="30000" data-path="timeoutMs" placeholder="8000"'), '1000–30000. How long to wait for the guest system.') +
       fieldH('pg-max', 'Max records', pgTxt('maxRecords', d.maxRecords, ' id="pg-max" type="number" min="1" max="5000" data-path="maxRecords" placeholder="200"'), 'Safety cap on how many records a response may contain.') +
@@ -1452,7 +1487,14 @@
       fieldH('pg-au-pi', 'Send token in', pgSel('auth.placement.in', ['header', 'query', 'body'], a.placement.in, ' id="pg-au-pi"'), '') +
       fieldH('pg-au-pn', 'Name', pgTxt('auth.placement.name', a.placement.name, ' id="pg-au-pn" placeholder="Authorization"'), 'Header / query / body key the token goes under.') +
       fieldH('pg-au-pp', 'Prefix', pgTxt('auth.placement.prefix', a.placement.prefix, ' id="pg-au-pp" placeholder="Bearer "'), 'Prepended to the token value.') +
-      '</div>' + pgSectionSecrets() + '</div>';
+      '</div><div class="pg-toggles" style="margin-top:6px">' +
+      pgChk('auth.basicOn', a.basicOn, 'Send HTTP Basic auth on the token request', ' data-restructure') +
+      '</div>' +
+      (a.basicOn ? '<div class="row pg-r">' +
+        fieldH('pg-au-bu', 'Basic auth user', pgTxt('auth.basic.user', a.basic.user, ' id="pg-au-bu" placeholder="{{secret.username}}"'), '') +
+        fieldH('pg-au-bp', 'Basic auth pass', pgTxt('auth.basic.pass', a.basic.pass, ' id="pg-au-bp" placeholder="{{secret.password}}"'), '') +
+        '</div>' : '') +
+      pgSectionSecrets() + '</div>';
   }
 
   function pgSectionSecrets() {
@@ -1495,15 +1537,26 @@
       '</div>' +
       '<div class="field pg-f"><label>Headers</label>' + pgKvRows(d.headerRows, 'add-hdr', 'del-hdr', 'headerRows', ['X-Api-Key', '{{secret.' + (d.secretKeys[d.secretKeys.length - 1] || 'apiKey') + '}}']) + '</div>' +
       '<div class="field pg-f"><label for="pg-rq-b">Body template</label>' + pgTa('request.bodyTemplate', rq.bodyTemplate, ' id="pg-rq-b" rows="3" class="mono-ta" placeholder="(leave empty for GET)"') +
-      '<span class="hint">Rendered and escaped for the content type above.</span></div></div>';
+      '<span class="hint">Rendered and escaped for the content type above.</span></div>' +
+      '<div class="pg-toggles" style="margin-top:6px">' +
+      pgChk('request.basicOn', rq.basicOn, 'Send HTTP Basic auth on this request', ' data-restructure') +
+      '</div>' +
+      (rq.basicOn ? '<div class="row pg-r">' +
+        fieldH('pg-rq-bu', 'Basic auth user', pgTxt('request.basic.user', rq.basic.user, ' id="pg-rq-bu" placeholder="{{secret.username}}"'), '') +
+        fieldH('pg-rq-bp', 'Basic auth pass', pgTxt('request.basic.pass', rq.basic.pass, ' id="pg-rq-bp" placeholder="{{secret.password}}"'), '') +
+        '</div>' : '') +
+      '</div>';
   }
 
   function pgSectionParser() {
     var d = pg.draft, ps = d.parse;
-    var ctx = '';
+    var ctx = '', extra = '';
     if (ps.type === 'regex') {
       ctx = '<div class="field pg-f"><label for="pg-ps-rx">Record regex</label>' + pgTa('parse.recordRegex', ps.recordRegex, ' id="pg-ps-rx" rows="3" class="mono-ta" data-path="parse.recordRegex"') +
         '<span class="hint">One match per record, using named groups: <code>Room: (?&lt;room&gt;\\S+)</code>. Group names become field names.</span></div>';
+    } else if (ps.type === 'csv') {
+      ctx = fieldH('pg-ps-delim', 'Delimiter', pgSel('parse.delimiter', [[',', ','], [';', ';'], ['\t', 'tab'], ['auto', 'auto']], ps.delimiter, ' id="pg-ps-delim"'), '\'auto\' sniffs the first line.');
+      extra = '<div class="pg-toggles" style="margin-top:10px">' + pgChk('parse.header', ps.header, 'First row is a header') + '</div>';
     } else {
       ctx = fieldH('pg-ps-root', 'Root path', pgTxt('parse.root', ps.root, ' id="pg-ps-root" data-path="parse.root" placeholder="' + (ps.type === 'xml' ? 'guests.guest' : 'guests') + '"'),
         ps.type === 'xml' ? 'Dotted path to the repeating element, e.g. <code>guests.guest</code>. Blank = the document root.'
@@ -1514,19 +1567,105 @@
         '<select class="kv-pick" data-fieldpick="' + i + '"><option value="">canonical…</option>' + pgOpts(CANON_FIELDS, '') + '</select>' +
         '<input class="kv-k" data-bind="fieldRows.' + i + '.key" value="' + esc(f.key) + '" placeholder="field name">' +
         '<span class="kv-arrow">→</span>' +
-        '<input class="kv-v" data-bind="fieldRows.' + i + '.path" value="' + esc(f.path) + '" placeholder="' + (ps.type === 'regex' ? 'capture group' : 'path in the record') + '">' +
+        '<input class="kv-v" data-bind="fieldRows.' + i + '.path" value="' + esc(f.path) + '" placeholder="' + (ps.type === 'regex' ? 'capture group' : ps.type === 'csv' ? 'column name or #index' : 'path in the record') + '">' +
         '<button type="button" class="btn sm kv-x" data-act="del-field:' + i + '" title="Remove">×</button></div>';
     }).join('') : '<p class="muted kv-empty">No fields mapped yet.</p>';
     return '<div class="card pg-sec"><h2>Parser</h2>' +
       '<p class="hint">Turns the response into records, then names the bits you care about. Canonical names carry meaning downstream — <code>firstName</code>/<code>lastName</code>/<code>room</code> build the guest label; <code>checkIn</code>/<code>checkOut</code> feed the stay window.</p>' +
       '<div class="row pg-r">' +
-      fieldH('pg-ps-t', 'Response type', pgSel('parse.type', ['json', 'xml', 'regex'], ps.type, ' id="pg-ps-t" data-restructure'), '') +
+      fieldH('pg-ps-t', 'Response type', pgSel('parse.type', ['json', 'xml', 'regex', 'csv'], ps.type, ' id="pg-ps-t" data-restructure'), '') +
       ctx +
       fieldH('pg-ps-df', 'Date format', pgSel('parse.dateFormat', ['iso', 'dmy', 'mdy', 'ymd', 'epoch', 'sql'], ps.dateFormat, ' id="pg-ps-df"'), 'How check-in / check-out dates are written in the response. <code>sql</code> = <code>YYYY-MM-DD HH:MM:SS</code> (UTC).') +
-      '</div>' +
+      '</div>' + extra +
       '<div class="field pg-f"><label>Field map</label><div class="kv-list">' + rows + '</div>' +
       '<button type="button" class="btn sm" data-act="add-field">+ Add field</button>' +
-      '<span class="hint">Left: the name you will use in match rules. Right: where to read it from each record' + (ps.type === 'regex' ? ' (the capture group name).' : ' (a dotted path inside the record).') + '</span></div></div>';
+      '<span class="hint">Left: the name you will use in match rules. Right: where to read it from each record' +
+      (ps.type === 'regex' ? ' (the capture group name).' : ps.type === 'csv' ? ' (column name or #index).' : ' (a dotted path inside the record).') + '</span></div></div>';
+  }
+
+  // ---- source: 'list' — a small CSV table stored server-side instead of a
+  // live HTTP lookup. pg.list holds the fetched {count, sample, columns} —
+  // it is not part of the recipe draft, it's just what /list currently returns.
+  function pgListRefresh() {
+    if (pg.id == null) return;
+    pg.list.loading = true;
+    api('/api/plugins/' + pg.id + '/list').then(function (r) {
+      pg.list.loading = false;
+      pg.list.info = r;
+      pg.list.error = null;
+      pgRender();
+    }).catch(function (e) {
+      pg.list.loading = false;
+      pg.list.info = null;
+      pg.list.error = e.message;
+      pgRender();
+    });
+  }
+
+  function pgListReplace() {
+    if (pg.id == null) return;
+    var ta = document.getElementById('pg-list-csv');
+    var csv = ta ? ta.value : '';
+    if (!csv.trim()) return toast('Paste or choose a CSV file first', true);
+    var btn = view.querySelector('[data-act="list-replace"]');
+    if (btn) btn.disabled = true;
+    api('/api/plugins/' + pg.id + '/list', { method: 'PUT', body: { csv: csv } }).then(function (r) {
+      toast('Guest list replaced — ' + r.count + ' row' + (r.count === 1 ? '' : 's'), { level: 'ok' });
+      pgListRefresh();
+    }).catch(function (e) {
+      if (btn) btn.disabled = false;
+      toast(e.message, true);
+    });
+  }
+
+  function pgListClear() {
+    if (pg.id == null) return;
+    if (!confirm('Delete all stored guest list rows for this plugin?')) return;
+    api('/api/plugins/' + pg.id + '/list', { method: 'DELETE' }).then(function () {
+      toast('Guest list cleared', { level: 'ok' });
+      pgListRefresh();
+    }).catch(function (e) { toast(e.message, true); });
+  }
+
+  function pgSectionGuestList() {
+    var mappedHint = CANON_FIELDS.map(function (f) { return '<code>' + esc(f) + '</code>'; }).join(', ');
+    var head = '<div class="card pg-sec"><h2>Guest list</h2>' +
+      '<p class="hint">Paste or upload guest rows as CSV — the first row must be the column names. Columns named ' +
+      mappedHint + ' map automatically; anything else is still available to reference from match rules and the stay window.</p>';
+    if (pg.id == null) {
+      return head + '<p class="empty">Save the plugin first, then paste the guest list.</p></div>';
+    }
+    var info = pg.list.info;
+    var summary;
+    if (pg.list.error) {
+      summary = '<p class="bad">' + esc(pg.list.error) + '</p>';
+    } else if (!info) {
+      summary = '<p class="muted">Loading…</p>';
+    } else {
+      summary = '<p class="hint"><b>' + (info.count || 0) + '</b> row' + (info.count === 1 ? '' : 's') + ' stored' +
+        (info.columns && info.columns.length ? ' — columns: ' + info.columns.map(function (c) { return '<code>' + esc(c) + '</code>'; }).join(', ') : '') +
+        '</p>';
+    }
+    var sampleRows = (info && info.sample) || [];
+    var sampleHtml = '';
+    if (sampleRows.length) {
+      var cols = (info.columns && info.columns.length) ? info.columns : Object.keys(sampleRows[0] || {});
+      sampleHtml = '<div class="tr-table" style="margin-top:8px"><table><thead><tr>' +
+        cols.map(function (c) { return '<th>' + esc(c) + '</th>'; }).join('') + '</tr></thead><tbody>' +
+        sampleRows.slice(0, 5).map(function (row) {
+          return '<tr>' + cols.map(function (c) { return '<td class="mono">' + esc(row[c] == null ? '' : row[c]) + '</td>'; }).join('') + '</tr>';
+        }).join('') + '</tbody></table></div>';
+    } else if (info && !info.count) {
+      sampleHtml = '<p class="muted kv-empty">No rows stored yet.</p>';
+    }
+    return head + summary + sampleHtml +
+      '<div class="field pg-f"><label for="pg-list-csv">Paste CSV (first row = column names)</label>' +
+      '<textarea id="pg-list-csv" rows="6" class="mono-ta" placeholder="room,lastName,checkIn,checkOut\n101,Smith,2026-09-09,2026-09-12"></textarea>' +
+      '<span class="hint">Or choose a file: <input type="file" id="pg-list-file" accept=".csv,text/csv"></span></div>' +
+      '<div class="row pg-r">' +
+      '<button type="button" class="btn primary" data-act="list-replace">Replace list</button>' +
+      '<button type="button" class="btn danger" data-act="list-clear">Clear list</button>' +
+      '</div></div>';
   }
 
   function pgSectionMatch() {
@@ -1687,8 +1826,11 @@
           '<input id="pg-t-' + esc(i.name) + '" data-testin="' + esc(i.name) + '" type="' + esc(i.type === 'number' ? 'number' : i.type) + '" value="' + esc(pg.testInputs[i.name] || '') + '" placeholder="' + esc(i.placeholder || '') + '">');
       }).join('') + '<button type="button" class="btn primary" data-act="run-test"' + (pg.testRunning ? ' disabled' : '') + '>' + (pg.testRunning ? 'Running…' : 'Run lookup') + '</button></div>';
     }
+    var testHint = d.source === 'list'
+      ? 'Runs the lookup against the stored guest list — nothing is granted, no guest is logged in.'
+      : 'Runs the saved recipe against the live guest system with a fresh token — nothing is granted, no guest is logged in.';
     return '<div class="card pg-sec" id="pg-test"><h2>Test</h2>' +
-      '<p class="hint">Runs the saved recipe against the live guest system with a fresh token — nothing is granted, no guest is logged in.</p>' +
+      '<p class="hint">' + testHint + '</p>' +
       body + '<div id="pg-test-out">' + (pg.testResult ? pgTestResultHtml(pg.testResult) : '') + '</div></div>';
   }
 
@@ -1749,6 +1891,9 @@
       body = '<div class="card pg-sec"><h2>Raw recipe JSON</h2>' +
         '<p class="hint">The whole recipe as the API sees it. Switching back to the guided form parses this; invalid JSON keeps you here. Secrets you type here are sent on save — blank values keep whatever is stored.</p>' +
         '<textarea id="pg-raw" class="raw-json" spellcheck="false">' + esc(pg.rawText) + '</textarea></div>';
+    } else if (d.source === 'list') {
+      body = pgSectionBasics() + pgSectionGuestList() +
+        pgSectionMatch() + pgSectionWindow() + pgSectionInputs() + pgSectionMessages();
     } else {
       body = pgSectionBasics() + pgSectionAuth() +
         (d.hasSteps ? pgSectionStepsNotice() : (pgSectionRequest() + pgSectionParser())) +
@@ -1761,6 +1906,11 @@
       : '';
     view.innerHTML = head + bar + errs + body + pgTestCard() + bar;
     pgBind(view);
+
+    // Guest list card shows server-fetched state, not draft state — fetch it
+    // lazily whenever the card is visible and nothing is loaded yet (covers
+    // both the initial open and switching Source to 'list' mid-edit).
+    if (!pg.raw && d.source === 'list' && pg.id != null && !pg.list.info && !pg.list.error && !pg.list.loading) pgListRefresh();
 
     if (pgFocusTest) {
       pgFocusTest = false;
@@ -1815,6 +1965,18 @@
     });
     var raw = root.querySelector('#pg-raw');
     if (raw) raw.addEventListener('input', function () { pg.rawText = raw.value; });
+    var listFile = root.querySelector('#pg-list-file');
+    if (listFile) listFile.addEventListener('change', function () {
+      var f = listFile.files[0];
+      if (!f) return;
+      var reader = new FileReader();
+      reader.onload = function () {
+        var ta = document.getElementById('pg-list-csv');
+        if (ta) ta.value = String(reader.result || '');
+      };
+      reader.onerror = function () { toast('Could not read that file', true); };
+      reader.readAsText(f);
+    });
     root.querySelectorAll('[data-act]').forEach(function (el) {
       el.addEventListener('click', function (e) { e.preventDefault(); pgAction(el.dataset.act); });
     });
@@ -1864,6 +2026,8 @@
     if (a === 'raw') return pgToggleRaw();
     if (a === 'save') return pgSave().catch(function () { /* surfaced as a toast + inline errors */ });
     if (a === 'run-test') return pgRunTest();
+    if (a === 'list-replace') return pgListReplace();
+    if (a === 'list-clear') return pgListClear();
   }
 
   // Never echoes stored secret values back into the guided form — this only

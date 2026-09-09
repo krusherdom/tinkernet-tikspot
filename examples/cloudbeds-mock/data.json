@@ -1,0 +1,80 @@
+{
+  "_comment": "All fictional data. startDate/endDate accept a literal 'YYYY-MM-DD' string or a relative 'NOW±<N>d' token, resolved once at server startup relative to the instant the process started (see resolveDate() in server.js).",
+
+  "reservations": [
+    {
+      "reservationID": "R-1",
+      "status": "checked_in",
+      "startDate": "NOW-1d",
+      "endDate": "NOW+2d",
+      "guestName": "Priya Shah",
+      "guestID": "g1",
+      "guestList": {
+        "g1": {
+          "guestFirstName": "Priya",
+          "guestLastName": "Shah",
+          "guestEmail": "priya.shah@example.com",
+          "guestPhone": "",
+          "guestCellPhone": "+91 98765 00001",
+          "roomName": "101",
+          "startDate": "NOW-1d",
+          "endDate": "NOW+2d",
+          "isMainGuest": true
+        }
+      }
+    },
+    {
+      "reservationID": "R-2",
+      "status": "checked_in",
+      "startDate": "NOW-2d",
+      "endDate": "NOW+3d",
+      "guestName": "Owen Fitzgerald",
+      "guestID": "g2",
+      "guestList": {
+        "g2": {
+          "guestFirstName": "Owen",
+          "guestLastName": "Fitzgerald",
+          "guestEmail": "owen.fitzgerald@example.com",
+          "guestPhone": "+353 1 000 0002",
+          "guestCellPhone": "",
+          "roomName": "205",
+          "startDate": "NOW-2d",
+          "endDate": "NOW+3d",
+          "isMainGuest": true
+        },
+        "g2b": {
+          "guestFirstName": "Maeve",
+          "guestLastName": "Fitzgerald",
+          "guestEmail": "",
+          "guestPhone": "",
+          "guestCellPhone": "+353 1 000 0003",
+          "roomName": "205",
+          "startDate": "NOW-2d",
+          "endDate": "NOW+3d",
+          "isMainGuest": false
+        }
+      }
+    },
+    {
+      "reservationID": "R-3",
+      "status": "confirmed",
+      "startDate": "NOW+5d",
+      "endDate": "NOW+8d",
+      "guestName": "Sana Haddad",
+      "guestID": "g3",
+      "guestList": {
+        "g3": {
+          "guestFirstName": "Sana",
+          "guestLastName": "Haddad",
+          "guestEmail": "sana.haddad@example.com",
+          "guestPhone": "",
+          "guestCellPhone": "+961 1 000004",
+          "roomName": "310",
+          "startDate": "NOW+5d",
+          "endDate": "NOW+8d",
+          "isMainGuest": true
+        }
+      }
+    }
+  ]
+}

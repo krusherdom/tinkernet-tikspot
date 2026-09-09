@@ -1,0 +1,46 @@
+{
+  "_comment": "All fictional data. arrival/departure accept a literal ISO string or a relative 'NOW±<N>h' / 'NOW±<N>d' token, resolved once at server startup relative to the instant the process started (see resolveDate() in server.js).",
+
+  "reservations": [
+    {
+      "id": "RES-1001",
+      "status": "InHouse",
+      "arrival": "NOW-1d",
+      "departure": "NOW+2d",
+      "unit": { "id": "unit-101", "name": "101", "description": "Standard double", "unitGroupId": "ug-standard" },
+      "unitGroup": { "id": "ug-standard", "name": "Standard rooms" },
+      "primaryGuest": { "firstName": "Marta", "lastName": "Kowalski", "email": "marta.kowalski@example.com", "phone": "+49 30 1000001" },
+      "property": { "id": "BER", "code": "BER", "name": "Apaleo Demo Berlin" }
+    },
+    {
+      "id": "RES-1002",
+      "status": "Confirmed",
+      "arrival": "NOW+3d",
+      "departure": "NOW+5d",
+      "unit": { "id": "unit-205", "name": "205", "description": "Deluxe twin", "unitGroupId": "ug-deluxe" },
+      "unitGroup": { "id": "ug-deluxe", "name": "Deluxe rooms" },
+      "primaryGuest": { "firstName": "Yusuf", "lastName": "Demir", "email": "yusuf.demir@example.com", "phone": "+49 30 1000002" },
+      "property": { "id": "BER", "code": "BER", "name": "Apaleo Demo Berlin" }
+    },
+    {
+      "id": "RES-1003",
+      "status": "CheckedOut",
+      "arrival": "NOW-6d",
+      "departure": "NOW-3d",
+      "unit": { "id": "unit-310", "name": "310", "description": "Standard single", "unitGroupId": "ug-standard" },
+      "unitGroup": { "id": "ug-standard", "name": "Standard rooms" },
+      "primaryGuest": { "firstName": "Ines", "lastName": "Alves", "email": "ines.alves@example.com", "phone": "+49 30 1000003" },
+      "property": { "id": "BER", "code": "BER", "name": "Apaleo Demo Berlin" }
+    },
+    {
+      "id": "RES-1004",
+      "status": "Confirmed",
+      "arrival": "NOW-50h",
+      "departure": "NOW-26h",
+      "unit": { "id": "unit-420", "name": "420", "description": "Standard double", "unitGroupId": "ug-standard" },
+      "unitGroup": { "id": "ug-standard", "name": "Standard rooms" },
+      "primaryGuest": { "firstName": "Petra", "lastName": "Lund", "email": "petra.lund@example.com", "phone": "+49 30 1000004" },
+      "property": { "id": "BER", "code": "BER", "name": "Apaleo Demo Berlin" }
+    }
+  ]
+}

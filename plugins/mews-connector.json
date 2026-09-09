@@ -1,0 +1,224 @@
+{
+  "format": "tikspot-plugin",
+  "version": 2,
+  "recipe": {
+    "name": "Mews Connector API",
+    "enabled": false,
+    "planGroup": "free",
+    "timeoutMs": 8000,
+    "allowInsecureTls": false,
+    "maxRecords": 100,
+    "maxFanOut": 10,
+    "secretKeys": [
+      "clientToken",
+      "accessToken"
+    ],
+    "secretLabels": {
+      "clientToken": "Client token (from Mews)",
+      "accessToken": "Access token (from the property)"
+    },
+    "params": {
+      "baseUrl": {
+        "label": "Mews Connector API base URL",
+        "type": "text",
+        "default": "https://api.mews.com",
+        "help": "Mews Connector API origin. Production: https://api.mews.com. Mews's public demo (for trying this recipe without your own property): https://api.mews-demo.com. For the bundled mock use http://<workstation LAN IP>:8093."
+      },
+      "clientName": {
+        "label": "Client application name",
+        "type": "text",
+        "default": "Tikspot hotspot",
+        "help": "Sent as the Connector API's \"Client\" field — a short name identifying this integration to Mews. Any short string is fine."
+      }
+    },
+    "paramValues": {},
+    "steps": [
+      {
+        "name": "room",
+        "request": {
+          "method": "POST",
+          "url": "{{param.baseUrl}}/api/connector/v1/resources/getAll",
+          "headers": {},
+          "contentType": "json",
+          "accept": "json",
+          "bodyJson": {
+            "ClientToken": "{{secret.clientToken}}",
+            "AccessToken": "{{secret.accessToken}}",
+            "Client": "{{param.clientName}}",
+            "Names": [
+              "{{input.room}}"
+            ],
+            "Limitation": {
+              "Count": 20
+            }
+          }
+        },
+        "parse": {
+          "type": "json",
+          "root": "Resources",
+          "fields": {
+            "resourceId": "Id",
+            "room": "Name"
+          },
+          "dateFormat": "iso"
+        },
+        "requireRecords": true
+      },
+      {
+        "name": "reservations",
+        "request": {
+          "method": "POST",
+          "url": "{{param.baseUrl}}/api/connector/v1/reservations/getAll/2023-06-06",
+          "headers": {},
+          "contentType": "json",
+          "accept": "json",
+          "bodyJson": {
+            "ClientToken": "{{secret.clientToken}}",
+            "AccessToken": "{{secret.accessToken}}",
+            "Client": "{{param.clientName}}",
+            "AssignedResourceIds": "{{raw:steps.room.records[*].resourceId}}",
+            "CollidingUtc": {
+              "StartUtc": "{{date:-1d}}",
+              "EndUtc": "{{date:+1d}}"
+            },
+            "States": [
+              "Started",
+              "Confirmed"
+            ],
+            "Limitation": {
+              "Count": 50
+            }
+          }
+        },
+        "parse": {
+          "type": "json",
+          "root": "Reservations",
+          "fields": {
+            "bookingRef": "Number",
+            "accountId": "AccountId",
+            "checkIn": "ScheduledStartUtc",
+            "checkOut": "ScheduledEndUtc",
+            "status": "State",
+            "resourceId": "AssignedResourceId"
+          },
+          "dateFormat": "iso"
+        },
+        "extra": {
+          "room": "{{steps.room.records[0].room}}"
+        }
+      },
+      {
+        "name": "guest",
+        "forEach": "reservations",
+        "request": {
+          "method": "POST",
+          "url": "{{param.baseUrl}}/api/connector/v1/customers/getAll",
+          "headers": {},
+          "contentType": "json",
+          "accept": "json",
+          "bodyJson": {
+            "ClientToken": "{{secret.clientToken}}",
+            "AccessToken": "{{secret.accessToken}}",
+            "Client": "{{param.clientName}}",
+            "CustomerIds": [
+              "{{record.accountId}}"
+            ],
+            "Limitation": {
+              "Count": 1
+            }
+          }
+        },
+        "parse": {
+          "type": "json",
+          "root": "Customers",
+          "fields": {
+            "firstName": "FirstName",
+            "lastName": "LastName",
+            "email": "Email",
+            "mobile": "Phone"
+          },
+          "dateFormat": "iso"
+        }
+      }
+    ],
+    "match": {
+      "all": true,
+      "rules": [
+        {
+          "input": "room",
+          "field": "room",
+          "normalize": "digits"
+        },
+        {
+          "input": "last_name",
+          "field": "lastName",
+          "normalize": "name"
+        },
+        {
+          "input": "first_name",
+          "field": "firstName",
+          "normalize": "name"
+        },
+        {
+          "input": "email",
+          "field": "email",
+          "normalize": "email"
+        },
+        {
+          "input": "mobile",
+          "field": "mobile",
+          "normalize": "phone"
+        }
+      ],
+      "minRules": 2
+    },
+    "window": {
+      "start": "checkIn",
+      "end": "checkOut",
+      "leewayHours": 24,
+      "maxGrantHours": 168
+    },
+    "inputs": [
+      {
+        "name": "room",
+        "label": "Room number",
+        "type": "text",
+        "required": true,
+        "placeholder": "e.g. 101"
+      },
+      {
+        "name": "last_name",
+        "label": "Last name",
+        "type": "text",
+        "required": false,
+        "placeholder": "Smith"
+      },
+      {
+        "name": "first_name",
+        "label": "First name",
+        "type": "text",
+        "required": false,
+        "placeholder": "Jane"
+      },
+      {
+        "name": "email",
+        "label": "Email",
+        "type": "email",
+        "required": false,
+        "placeholder": "jane@example.com"
+      },
+      {
+        "name": "mobile",
+        "label": "Mobile number",
+        "type": "tel",
+        "required": false,
+        "placeholder": "+1 555 0100"
+      }
+    ],
+    "messages": {
+      "noMatch": "We could not find a Mews reservation matching that room and guest detail.",
+      "outsideWindow": "That Mews reservation's stay is not active yet, or has already ended.",
+      "upstream": "Mews is not responding — please try again or ask at the front desk."
+    }
+  }
+}

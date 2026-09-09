@@ -20,6 +20,18 @@
 //   - match.minRules: require at least N *matched, non-empty* rules.
 //   - auth.tokenExpiryPath / auth.bodyJson.
 //   - parse.dateFormat: 'sql'.
+//
+// 0.16 additions (still additive/backwards-compatible):
+//   - template helpers (base64/lower/upper/trim/urlencode/digits/date/today)
+//     usable anywhere renderTemplate runs — see template.js.
+//   - auth.basic / request.basic (and steps[].request.basic): declarative
+//     HTTP Basic auth (`Authorization: Basic base64(user:pass)`).
+//   - parse.type: 'csv', with delimiter/header/skipEmpty/quote options.
+//   - `source: 'http' | 'list'` — 'list' is the built-in guest-list source
+//     (no request/auth/steps; records come from plugin_list_rows via the
+//     caller, see engine.js's runLookup({records})).
+
+import { findUnknownHelpers, isTypedPlaceholder } from './template.js';
 
 export const RECIPE_VERSION = 2;
 
@@ -63,10 +75,15 @@ const REQUEST_METHODS = ['GET', 'POST'];
 const REQUEST_CONTENT_TYPES = ['json', 'form', 'xml', 'text'];
 const AUTH_METHODS = ['GET', 'POST'];
 const AUTH_CONTENT_TYPES = ['json', 'form'];
-const ACCEPT_TYPES = ['json', 'xml', 'text'];
-const PARSE_TYPES = ['json', 'xml', 'regex'];
+const ACCEPT_TYPES = ['json', 'xml', 'text', 'csv'];
+const PARSE_TYPES = ['json', 'xml', 'regex', 'csv'];
 const DATE_FORMATS = ['iso', 'dmy', 'mdy', 'ymd', 'epoch', 'sql'];
 const PLACEMENT_IN = ['header', 'query', 'body'];
+const CSV_DELIMITERS = [',', ';', '\t', '\\t', 'auto'];
+const SOURCES = ['http', 'list'];
+const PAGINATE_IN = ['query', 'body'];
+const EXTRA_NAME_RE = /^[a-zA-Z][a-zA-Z0-9_]{0,30}$/;
+const MAX_EXTRA_FIELDS = 16;
 
 function isPlainObject(v) {
   return v != null && typeof v === 'object' && !Array.isArray(v);
@@ -104,9 +121,11 @@ export function emptyRecipe() {
     name: '',
     enabled: true,
     planGroup: 'free',
+    source: 'http',
     timeoutMs: 8000,
     allowInsecureTls: false,
     maxRecords: 200,
+    requireRecords: false,
     secretKeys: [...DEFAULT_SECRET_KEYS],
     params: {},
     paramValues: {},
@@ -117,6 +136,122 @@ export function emptyRecipe() {
     messages: { ...DEFAULT_MESSAGES },
     secrets: { username: '', password: '', apiKey: '' },
   };
+}
+
+// Both `user` and `pass` must be strings (`pass` may be `''`) — used for
+// `auth.basic` / `request.basic` / `steps[].request.basic`: declarative HTTP
+// Basic auth (`Authorization: Basic base64(user:pass)`), rendered by the
+// engine with escape 'none' (CR/LF is always stripped by template.js). If a
+// token placement also targets the Authorization header, the token wins —
+// see engine.js.
+function validateBasicBlock(raw, path, fail) {
+  if (raw === undefined) return undefined;
+  if (!isPlainObject(raw)) {
+    fail(`${path}.basic`, `${path}.basic must be an object with "user" and "pass" templates`);
+    return undefined;
+  }
+  const userOk = typeof raw.user === 'string';
+  const passOk = typeof raw.pass === 'string';
+  if (!userOk) fail(`${path}.basic.user`, `${path}.basic.user must be a string`);
+  if (!passOk) fail(`${path}.basic.pass`, `${path}.basic.pass must be a string`);
+  return { user: userOk ? raw.user : '', pass: passOk ? raw.pass : '' };
+}
+
+// Best-effort scan of every template string a request/auth block exposes
+// (url, header values, bodyTemplate, bodyJson leaves) for an unrecognised
+// `{{helper:...}}` invocation — see template.js's findUnknownHelpers. Skips
+// bodyJson leaves that are an exact typed placeholder (`{{int:a.b}}` etc.),
+// which are valid there and aren't helpers at all.
+function checkTemplateHelpers(result, path, fail) {
+  const unknownIn = (str) => findUnknownHelpers(str);
+  if (result.url) {
+    const found = unknownIn(result.url);
+    if (found.length) fail(`${path}.url`, `unknown template helper "${found[0]}"`);
+  }
+  if (result.bodyTemplate) {
+    const found = unknownIn(result.bodyTemplate);
+    if (found.length) fail(`${path}.bodyTemplate`, `unknown template helper "${found[0]}"`);
+  }
+  for (const [k, v] of Object.entries(result.headers || {})) {
+    if (typeof v !== 'string') continue;
+    const found = unknownIn(v);
+    if (found.length) fail(`${path}.headers.${k}`, `unknown template helper "${found[0]}"`);
+  }
+  if (result.bodyJson !== undefined) {
+    const found = new Set();
+    (function walk(node) {
+      if (typeof node === 'string') {
+        if (isTypedPlaceholder(node)) return;
+        for (const h of unknownIn(node)) found.add(h);
+        return;
+      }
+      if (Array.isArray(node)) return node.forEach(walk);
+      if (node && typeof node === 'object') return Object.values(node).forEach(walk);
+    })(result.bodyJson);
+    if (found.size) fail(`${path}.bodyJson`, `unknown template helper "${[...found][0]}"`);
+  }
+}
+
+// steps[].paginate (also valid on the top-level request form as
+// request.paginate): repeats the SAME request, injecting a cursor value
+// (query param or a top-level JSON body key) taken from the previous page's
+// parsed response, appending records each time. Only meaningful for
+// parse.type: 'json' — checked by the caller once it knows the paired
+// parse block's type (see checkPaginateNeedsJsonParse).
+function validatePaginateBlock(raw, path, fail) {
+  if (raw === undefined) return undefined;
+  if (!isPlainObject(raw)) {
+    fail(`${path}.paginate`, `${path}.paginate must be an object`);
+    return undefined;
+  }
+  const cursorPath = typeof raw.cursorPath === 'string' ? raw.cursorPath.trim() : '';
+  if (!cursorPath) fail(`${path}.paginate.cursorPath`, `${path}.paginate.cursorPath is required`);
+  const morePath = typeof raw.morePath === 'string' ? raw.morePath.trim() : '';
+  const inPlacement = PAGINATE_IN.includes(raw.in) ? raw.in : 'query';
+  const name = typeof raw.name === 'string' ? raw.name.trim() : '';
+  if (!name) fail(`${path}.paginate.name`, `${path}.paginate.name is required`);
+  let maxPages = raw.maxPages === undefined ? 5 : Number(raw.maxPages);
+  if (!inRange(maxPages, 1, 10)) {
+    fail(`${path}.paginate.maxPages`, `${path}.paginate.maxPages must be between 1 and 10`);
+    maxPages = 5;
+  }
+  return { cursorPath, morePath, in: inPlacement, name, maxPages };
+}
+
+// paginate only makes sense when the paired parse block will hand back a
+// JSON document to walk for the next cursor. `path` is the parent path
+// ('request' or 'steps[i]') paginate hangs off of.
+function checkPaginateNeedsJsonParse(paginate, parseType, path, fail) {
+  if (paginate && parseType !== 'json') {
+    fail(`${path}.paginate`, `${path}.paginate is only supported for parse.type "json"`);
+  }
+}
+
+// steps[].extra: { fieldName: '<template>' } — rendered once per step (not
+// per-record) and stamped onto every record that step produced, overwriting
+// any existing value of the same name. Returns { extra, fieldNames }.
+function validateExtraBlock(raw, path, fail) {
+  if (raw === undefined) return { extra: undefined, fieldNames: [] };
+  if (!isPlainObject(raw)) {
+    fail(`${path}.extra`, `${path}.extra must be an object of { fieldName: template }`);
+    return { extra: undefined, fieldNames: [] };
+  }
+  const names = Object.keys(raw);
+  if (names.length > MAX_EXTRA_FIELDS) fail(`${path}.extra`, `extra supports at most ${MAX_EXTRA_FIELDS} fields`);
+  const extra = {};
+  names.slice(0, MAX_EXTRA_FIELDS).forEach((name) => {
+    const p = `${path}.extra.${name}`;
+    if (!EXTRA_NAME_RE.test(name)) {
+      fail(p, 'extra field name must start with a letter and contain only a-z, A-Z, 0-9, _ (max 31 chars)');
+      return;
+    }
+    if (typeof raw[name] !== 'string') {
+      fail(p, `${p} must be a template string`);
+      return;
+    }
+    extra[name] = raw[name];
+  });
+  return { extra, fieldNames: Object.keys(extra) };
 }
 
 // Applies request.bodyJson / auth.bodyJson (shared shape) onto an
@@ -139,7 +274,12 @@ function applyBodyJson(raw, result, path, fail) {
 }
 
 // Validates a `request`-shaped object (used for the top-level `request` and
-// every `steps[].request`).
+// every `steps[].request`). `basic` (declarative HTTP Basic auth) is shared
+// by both; `paginate` is NOT handled here — it hangs off the top-level
+// `request` object directly (see the !hasSteps branch below) but off the
+// STEP object itself for `steps[]` (`steps[].paginate`, a sibling of
+// `request`/`parse` — see the steps loop) since the two forms intentionally
+// differ in shape.
 function validateRequestBlock(r, path, fail) {
   if (!isHttpUrl(r.url)) fail(`${path}.url`, `${path}.url must be an http(s) URL`);
   const method = REQUEST_METHODS.includes(r.method) ? r.method : 'GET';
@@ -154,23 +294,43 @@ function validateRequestBlock(r, path, fail) {
   };
   if (accept) result.accept = accept;
   applyBodyJson(r, result, path, fail);
+  if (r.basic !== undefined) {
+    const basic = validateBasicBlock(r.basic, path, fail);
+    if (basic) result.basic = basic;
+  }
+  checkTemplateHelpers(result, path, fail);
   return result;
 }
 
 // Validates a `parse`-shaped object (used for the top-level `parse` and
 // every `steps[].parse`). Returns the normalised block; the caller collects
 // `Object.keys(result.fields)` into the union used for match/window refs.
+// `type: 'csv'` additionally carries delimiter/header/skipEmpty/quote —
+// `root`/`recordRegex` are ignored for csv (kept, but meaningless).
 function validateParseBlock(p, path, fail) {
   const type = PARSE_TYPES.includes(p.type) ? p.type : 'json';
   const dateFormat = DATE_FORMATS.includes(p.dateFormat) ? p.dateFormat : 'iso';
   const fields = isPlainObject(p.fields) ? { ...p.fields } : {};
-  return {
+  const result = {
     type,
     root: typeof p.root === 'string' ? p.root : '',
     recordRegex: typeof p.recordRegex === 'string' ? p.recordRegex : '',
     fields,
     dateFormat,
   };
+  if (type === 'csv') {
+    let delimiter = CSV_DELIMITERS.includes(p.delimiter) ? p.delimiter : ',';
+    if (delimiter === '\\t') delimiter = '\t';
+    result.delimiter = delimiter;
+    result.header = p.header === undefined ? true : !!p.header;
+    result.skipEmpty = p.skipEmpty === undefined ? true : !!p.skipEmpty;
+    result.quote = typeof p.quote === 'string' && p.quote.length === 1 ? p.quote : '"';
+    if (!result.header) {
+      const bad = Object.entries(fields).filter(([, spec]) => typeof spec !== 'string' || !/^#\d+$/.test(spec));
+      if (bad.length) fail(`${path}.fields`, `with header:false, parse.fields values must be "#<index>" (got "${bad[0][1]}" for "${bad[0][0]}")`);
+    }
+  }
+  return result;
 }
 
 function validateAuthBlock(a, path, fail) {
@@ -195,6 +355,11 @@ function validateAuthBlock(a, path, fail) {
     },
   };
   applyBodyJson(a, result, path, fail);
+  if (a.basic !== undefined) {
+    const basic = validateBasicBlock(a.basic, path, fail);
+    if (basic) result.basic = basic;
+  }
+  checkTemplateHelpers(result, path, fail);
   return result;
 }
 
@@ -232,6 +397,11 @@ export function validateRecipe(obj) {
   value.enabled = obj.enabled === undefined ? true : !!obj.enabled;
   value.planGroup = typeof obj.planGroup === 'string' && obj.planGroup.trim() ? obj.planGroup.trim() : 'free';
 
+  // v1/v2 recipes never had a `source` — they're implicitly 'http'. 'list' is
+  // the 0.16 built-in guest-list source (see the request/parse/steps branch
+  // below for what's forbidden/optional under it).
+  value.source = SOURCES.includes(obj.source) ? obj.source : 'http';
+
   value.timeoutMs = obj.timeoutMs === undefined ? 8000 : Number(obj.timeoutMs);
   if (!inRange(value.timeoutMs, 1000, 30000)) {
     fail('timeoutMs', 'timeoutMs must be between 1000 and 30000');
@@ -249,6 +419,13 @@ export function validateRecipe(obj) {
     fail('maxFanOut', 'maxFanOut must be between 1 and 25');
     value.maxFanOut = 10;
   }
+
+  // requireRecords on the RECIPE (not `request`) is how the top-level
+  // request/parse form (no `steps[]`) opts the synthesised "main" step into
+  // failing fast with reason:'no-match' when it comes back with zero
+  // records — see engine.js. `steps[].requireRecords` is the per-step
+  // equivalent when `steps[]` is used instead.
+  value.requireRecords = !!obj.requireRecords;
 
   // ---- declared secrets ----
   let secretKeys;
@@ -422,25 +599,49 @@ export function validateRecipe(obj) {
   });
   const inputNames = new Set(value.inputs.map((i) => i.name));
 
-  // ---- auth (optional) ----
+  const isList = value.source === 'list';
+
+  // ---- auth (optional; not allowed for source:'list') ----
   if (obj.auth !== undefined) {
-    if (!isPlainObject(obj.auth)) {
+    if (isList) {
+      fail('auth', 'auth is not allowed when source is "list"');
+    } else if (!isPlainObject(obj.auth)) {
       fail('auth', 'auth must be an object');
     } else {
       value.auth = validateAuthBlock(obj.auth, 'auth', fail);
     }
   }
 
-  // ---- request/parse OR steps ----
-  const hasSteps = Array.isArray(obj.steps) && obj.steps.length > 0;
+  // ---- request/parse OR steps (source:'http', the default) ----
+  // OR the built-in guest-list source (source:'list'): no request/auth/steps
+  // — records come from the caller (plugin_list_rows via store.listRows, see
+  // engine.js/portal/routes.js/admin/plugins.js) — and `parse` is optional,
+  // honouring only `fields` (canonical/custom name -> column name, case-
+  // insensitive) and `dateFormat`. Columns are used as-is when `fields` is
+  // absent, so match/window rules may reference ANY column name — those
+  // aren't knowable until an admin actually uploads a CSV, so `validFieldRef`
+  // below is permissive for list recipes rather than checked against
+  // `parse.fields`.
+  const hasSteps = !isList && Array.isArray(obj.steps) && obj.steps.length > 0;
   let parseFieldKeys = [];
 
-  if (!hasSteps) {
+  if (isList) {
+    if (obj.request !== undefined) fail('request', 'request is not allowed when source is "list"');
+    if (obj.steps !== undefined) fail('steps', 'steps is not allowed when source is "list"');
+    const p = isPlainObject(obj.parse) ? obj.parse : {};
+    value.parse = {
+      fields: isPlainObject(p.fields) ? { ...p.fields } : {},
+      dateFormat: DATE_FORMATS.includes(p.dateFormat) ? p.dateFormat : 'iso',
+    };
+    parseFieldKeys = Object.keys(value.parse.fields);
+  } else if (!hasSteps) {
     if (!isPlainObject(obj.request)) {
       fail('request', 'request is required');
       value.request = emptyRequest();
     } else {
       value.request = validateRequestBlock(obj.request, 'request', fail);
+      const paginate = validatePaginateBlock(obj.request.paginate, 'request', fail);
+      if (paginate) value.request.paginate = paginate;
     }
 
     if (!isPlainObject(obj.parse)) {
@@ -450,6 +651,7 @@ export function validateRecipe(obj) {
       value.parse = validateParseBlock(obj.parse, 'parse', fail);
       parseFieldKeys = Object.keys(value.parse.fields);
     }
+    checkPaginateNeedsJsonParse(value.request.paginate, value.parse.type, 'request', fail);
   } else {
     // Steps present: top-level request/parse are optional, but validated if given.
     if (obj.request !== undefined) {
@@ -515,12 +717,22 @@ export function validateRecipe(obj) {
       const entry = { name: step.name, request, parse };
       if (forEachName) entry.forEach = forEachName;
       if (step.optional !== undefined) entry.optional = !!step.optional;
+      if (step.requireRecords !== undefined) entry.requireRecords = !!step.requireRecords;
+
+      const paginate = validatePaginateBlock(step.paginate, p, fail);
+      if (paginate) entry.paginate = paginate;
+      checkPaginateNeedsJsonParse(paginate, parse.type, p, fail);
+
+      const { extra, fieldNames } = validateExtraBlock(step.extra, p, fail);
+      if (extra && Object.keys(extra).length) entry.extra = extra;
+      parseFieldKeys.push(...fieldNames);
+
       steps.push(entry);
     });
     value.steps = steps;
   }
 
-  const validFieldRef = (name) => CANONICAL_FIELDS.includes(name) || parseFieldKeys.includes(name);
+  const validFieldRef = (name) => isList || CANONICAL_FIELDS.includes(name) || parseFieldKeys.includes(name);
 
   // ---- match (required) ----
   if (!isPlainObject(obj.match) || !Array.isArray(obj.match.rules) || !obj.match.rules.length) {
@@ -574,8 +786,10 @@ export function validateRecipe(obj) {
       fail('window', 'window must be an object');
     } else {
       const w = obj.window;
-      const startOk = typeof w.start === 'string' && parseFieldKeys.includes(w.start);
-      const endOk = typeof w.end === 'string' && parseFieldKeys.includes(w.end);
+      // For source:'list', any column name is acceptable (see validFieldRef
+      // above — the actual columns aren't known until a CSV is uploaded).
+      const startOk = typeof w.start === 'string' && (isList || parseFieldKeys.includes(w.start));
+      const endOk = typeof w.end === 'string' && (isList || parseFieldKeys.includes(w.end));
       if (!startOk) fail('window.start', 'window.start must be one of parse.fields');
       if (!endOk) fail('window.end', 'window.end must be one of parse.fields');
       const leewayHours = w.leewayHours === undefined ? 24 : Number(w.leewayHours);

@@ -174,9 +174,21 @@ export function updatePlugin(db, id, body) {
   const existingSecrets = secretsFromRow(row);
   const incoming = body && typeof body === 'object' ? body : {};
   const merged = { ...existing, ...incoming, id: row.id, secrets: { ...incoming.secrets } };
-  // `auth: null` / `window: null` are explicit deletes of an optional section
-  // (a merge would otherwise keep the stored one forever).
-  for (const k of ['auth', 'window']) if (incoming[k] === null) delete merged[k];
+  // `auth: null` / `window: null` / `request: null` / `steps: null` are
+  // explicit deletes of an optional section (a merge would otherwise keep
+  // the stored one forever).
+  for (const k of ['auth', 'window', 'request', 'steps']) if (incoming[k] === null) delete merged[k];
+  // Flipping `source` to 'list' (e.g. via the admin's Basics "Source" select)
+  // must not resurrect the PREVIOUSLY stored http shape (`request`/`auth`/
+  // `steps`) via the spread above — validateRecipe rejects those outright for
+  // source:'list'. Only drop them when the incoming body didn't itself send
+  // a value for that key (an explicit incoming request/auth/steps alongside
+  // source:'list' is still a validation error, as it should be).
+  if (merged.source === 'list') {
+    for (const k of ['request', 'auth', 'steps']) {
+      if (!Object.prototype.hasOwnProperty.call(incoming, k)) delete merged[k];
+    }
+  }
   return save(db, row.id, merged, existingSecrets);
 }
 
@@ -185,21 +197,85 @@ export function deletePlugin(db, id) {
   return info.changes > 0;
 }
 
-export function exportPlugin(db, id) {
+// exportPlugin(db, id, { includeRows }) — `includeRows` (default false) adds
+// a top-level `listRows` array for a source:'list' plugin. Defaulting to
+// false keeps a plain Export from leaking guest PII; the admin must
+// explicitly opt in (?includeRows=1 — see admin/plugins.js).
+export function exportPlugin(db, id, opts = {}) {
   const row = getRow(db, id);
   if (!row) return null;
   const recipe = recipeFromRow(row);
   delete recipe.id;
-  return { format: 'tikspot-plugin', version: 1, recipe };
+  const bundle = { format: 'tikspot-plugin', version: 1, recipe };
+  if (opts.includeRows && recipe.source === 'list') {
+    bundle.listRows = listRows(db, id).rows;
+  }
+  return bundle;
 }
 
 // Accepts either the full export envelope ({format, version, recipe}) or a
 // bare recipe object (e.g. one of examples/guest-api/recipes/*.json).
 // Imported recipes never arrive enabled or carrying secrets — the admin
 // reviews and fills in credentials before enabling — but `paramValues` (not
-// secret) are preserved as authored.
+// secret) are preserved as authored. A `listRows` array alongside `recipe`
+// (see exportPlugin's includeRows) is stored too, for a source:'list' plugin.
 export function importPlugin(db, obj) {
   const recipe = obj && typeof obj === 'object' && obj.recipe && typeof obj.recipe === 'object' ? obj.recipe : obj;
+  const incomingRows = obj && typeof obj === 'object' && Array.isArray(obj.listRows) ? obj.listRows : null;
   const safe = recipe && typeof recipe === 'object' ? { ...recipe, enabled: false, secrets: {} } : recipe;
-  return createPlugin(db, safe);
+  const result = createPlugin(db, safe);
+  if (result.ok && incomingRows) replaceListRows(db, result.id, incomingRows);
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Built-in guest-list source (Stage 0.16) — plugin_list_rows.
+
+const MAX_LIST_ROWS = 5000;
+
+// replaceListRows(db, pluginId, rows) — atomically replaces every stored row
+// for `pluginId` with `rows` (capped at MAX_LIST_ROWS; each row coerced to a
+// plain object of string values — CSV cells are already strings, but a JSON
+// `{rows:[...]}` import might not be). Returns { count }.
+export function replaceListRows(db, pluginId, rows) {
+  const id = Number(pluginId);
+  const capped = (Array.isArray(rows) ? rows : []).slice(0, MAX_LIST_ROWS).map((r) => {
+    const out = {};
+    if (r && typeof r === 'object') {
+      for (const [k, v] of Object.entries(r)) out[k] = v == null ? '' : String(v);
+    }
+    return out;
+  });
+  const tx = db.transaction((list) => {
+    db.prepare('DELETE FROM plugin_list_rows WHERE plugin_id = ?').run(id);
+    const insert = db.prepare('INSERT INTO plugin_list_rows (plugin_id, row_json) VALUES (?, ?)');
+    for (const row of list) insert.run(id, JSON.stringify(row));
+  });
+  tx(capped);
+  return { count: capped.length };
+}
+
+// listRows(db, pluginId, { limit }) -> { count, rows } — `count` is the TOTAL
+// row count regardless of `limit`; `rows` is capped at `limit` when given
+// (e.g. the admin's 20-row sample), otherwise every row (used by the engine
+// at lookup time and by export).
+export function listRows(db, pluginId, opts = {}) {
+  const id = Number(pluginId);
+  const countRow = db.prepare('SELECT COUNT(*) AS n FROM plugin_list_rows WHERE plugin_id = ?').get(id);
+  let sql = 'SELECT row_json FROM plugin_list_rows WHERE plugin_id = ? ORDER BY id';
+  const params = [id];
+  if (opts && Number.isFinite(opts.limit)) {
+    sql += ' LIMIT ?';
+    params.push(opts.limit);
+  }
+  const rows = db
+    .prepare(sql)
+    .all(...params)
+    .map((r) => parseJson(r.row_json, {}));
+  return { count: countRow ? countRow.n : 0, rows };
+}
+
+export function countListRows(db, pluginId) {
+  const row = db.prepare('SELECT COUNT(*) AS n FROM plugin_list_rows WHERE plugin_id = ?').get(Number(pluginId));
+  return row ? row.n : 0;
 }

@@ -1,6 +1,6 @@
 {
   "name": "tikspot",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "private": true,
   "description": "MikroTik hotspot container: FreeRADIUS + live captive portal + admin portal",
   "scripts": {
@@ -10,6 +10,11 @@
     "size": "node scripts/check-size.mjs tikspot:dev",
     "guest-api": "node examples/guest-api/server.js",
     "rms-mock": "node examples/rms-mock/server.js",
+    "mews-mock": "node examples/mews-mock/server.js",
+    "apaleo-mock": "node examples/apaleo-mock/server.js",
+    "cloudbeds-mock": "node examples/cloudbeds-mock/server.js",
+    "eventbrite-mock": "node examples/eventbrite-mock/server.js",
+    "csv-guest-list": "node examples/csv-guest-list/serve.js",
     "test": "cd app && npm test"
   },
   "license": "MIT"

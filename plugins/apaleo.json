@@ -1,0 +1,161 @@
+{
+  "format": "tikspot-plugin",
+  "version": 2,
+  "recipe": {
+    "name": "Apaleo",
+    "enabled": false,
+    "planGroup": "free",
+    "timeoutMs": 8000,
+    "allowInsecureTls": false,
+    "maxRecords": 100,
+    "maxFanOut": 10,
+    "secretKeys": [
+      "clientId",
+      "clientSecret"
+    ],
+    "secretLabels": {
+      "clientId": "Client ID",
+      "clientSecret": "Client secret"
+    },
+    "params": {
+      "baseUrl": {
+        "label": "Apaleo API base URL",
+        "type": "text",
+        "default": "https://api.apaleo.com",
+        "help": "Apaleo's booking API origin. For the bundled mock use http://<workstation LAN IP>:8094."
+      },
+      "identityUrl": {
+        "label": "Apaleo identity URL",
+        "type": "text",
+        "default": "https://identity.apaleo.com",
+        "help": "Apaleo's OAuth token endpoint origin. For the bundled mock use http://<workstation LAN IP>:8094."
+      },
+      "propertyId": {
+        "label": "Property code",
+        "type": "text",
+        "help": "The Apaleo property code this recipe searches, e.g. \"BER\". Required — find it in the Apaleo backoffice under Property settings."
+      }
+    },
+    "paramValues": {},
+    "auth": {
+      "method": "POST",
+      "url": "{{param.identityUrl}}/connect/token",
+      "headers": {},
+      "contentType": "form",
+      "bodyTemplate": "grant_type=client_credentials",
+      "basic": {
+        "user": "{{secret.clientId}}",
+        "pass": "{{secret.clientSecret}}"
+      },
+      "tokenPath": "access_token",
+      "tokenTtlSecs": 3000,
+      "placement": {
+        "in": "header",
+        "name": "Authorization",
+        "prefix": "Bearer "
+      }
+    },
+    "request": {
+      "method": "GET",
+      "url": "{{param.baseUrl}}/booking/v1/reservations?propertyIds={{param.propertyId}}&status=InHouse&status=Confirmed&dateFilter=Stay&from={{date:-1d:ymd}}&to={{date:+1d:ymd}}&pageSize=100",
+      "headers": {},
+      "contentType": "json",
+      "accept": "json"
+    },
+    "parse": {
+      "type": "json",
+      "root": "reservations",
+      "fields": {
+        "room": "unit.name",
+        "firstName": "primaryGuest.firstName",
+        "lastName": "primaryGuest.lastName",
+        "email": "primaryGuest.email",
+        "mobile": "primaryGuest.phone",
+        "checkIn": "arrival",
+        "checkOut": "departure",
+        "bookingRef": "id",
+        "status": "status"
+      },
+      "dateFormat": "iso"
+    },
+    "match": {
+      "all": true,
+      "rules": [
+        {
+          "input": "room",
+          "field": "room",
+          "normalize": "digits"
+        },
+        {
+          "input": "last_name",
+          "field": "lastName",
+          "normalize": "name"
+        },
+        {
+          "input": "first_name",
+          "field": "firstName",
+          "normalize": "name"
+        },
+        {
+          "input": "email",
+          "field": "email",
+          "normalize": "email"
+        },
+        {
+          "input": "mobile",
+          "field": "mobile",
+          "normalize": "phone"
+        }
+      ],
+      "minRules": 2
+    },
+    "window": {
+      "start": "checkIn",
+      "end": "checkOut",
+      "leewayHours": 24,
+      "maxGrantHours": 168
+    },
+    "inputs": [
+      {
+        "name": "room",
+        "label": "Room number",
+        "type": "text",
+        "required": true,
+        "placeholder": "e.g. 101"
+      },
+      {
+        "name": "last_name",
+        "label": "Last name",
+        "type": "text",
+        "required": false,
+        "placeholder": "Smith"
+      },
+      {
+        "name": "first_name",
+        "label": "First name",
+        "type": "text",
+        "required": false,
+        "placeholder": "Jane"
+      },
+      {
+        "name": "email",
+        "label": "Email",
+        "type": "email",
+        "required": false,
+        "placeholder": "jane@example.com"
+      },
+      {
+        "name": "mobile",
+        "label": "Mobile number",
+        "type": "tel",
+        "required": false,
+        "placeholder": "+1 555 0100"
+      }
+    ],
+    "messages": {
+      "noMatch": "We could not find an Apaleo reservation matching that room and guest detail.",
+      "outsideWindow": "That Apaleo reservation's stay is not active yet, or has already ended.",
+      "upstream": "Apaleo is not responding — please try again or ask at the front desk."
+    }
+  }
+}

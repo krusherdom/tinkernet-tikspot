@@ -7,15 +7,137 @@
 // (`{{int:a.b}}`, `{{number:a.b}}`, `{{bool:a.b}}`, `{{raw:a.b}}`,
 // `{{string:a.b}}`) for building structured JSON request bodies — see
 // request.bodyJson / auth.bodyJson in recipe.js.
+//
+// 0.16: a small set of string HELPERS work everywhere renderTemplate runs
+// (URLs, headers, bodyTemplate) AND inside renderJsonTemplate string leaves
+// that aren't an exact typed placeholder:
+//   {{base64:path}}      base64 of the UTF-8 value
+//   {{lower:path}}, {{upper:path}}, {{trim:path}}
+//   {{urlencode:path}}   encodeURIComponent, inserted as-is (never re-escaped)
+//   {{digits:path}}      digits only
+//   {{date:<offset>}} / {{date:<offset>:<fmt>}}
+//                         ISO-8601 UTC timestamp of now + offset; offset is
+//                         `[+-]<int><unit>` (m/h/d), fmt is iso (default) |
+//                         ymd | sql | epoch
+//   {{today}}             shorthand for {{date:0d:ymd}}
+// Helpers always render a string; an unknown helper name renders ''.
+// `now`/`today` are derived from the vars bag's own `now` (which callers —
+// engine.js's templateVars — derive from the injected `nowMs`), so tests
+// stay deterministic.
 
 import { getPath } from './parsers.js';
 
-const PLACEHOLDER_RE = /\{\{\s*([a-zA-Z0-9_.[\]]+)\s*\}\}/g;
-const TYPED_PLACEHOLDER_RE = /^\{\{\s*(int|number|bool|raw|string):([a-zA-Z0-9_.[\]]+)\s*\}\}$/;
+const PLACEHOLDER_RE = /\{\{\s*([a-zA-Z0-9_.[\]*:+-]+)\s*\}\}/g;
+const TYPED_PLACEHOLDER_RE = /^\{\{\s*(int|number|bool|raw|string):([a-zA-Z0-9_.[\]*]+)\s*\}\}$/;
+
+// True for a string that is EXACTLY one typed placeholder (`{{int:a.b}}`
+// etc.) — the one case renderJsonTemplate coerces to a real JS value instead
+// of running it through renderTemplate. Exported so recipe.js's best-effort
+// unknown-helper scan of bodyJson leaves can skip these (they're not helpers).
+export function isTypedPlaceholder(str) {
+  return typeof str === 'string' && TYPED_PLACEHOLDER_RE.test(str.trim());
+}
+
+const KNOWN_HELPERS = ['base64', 'lower', 'upper', 'trim', 'urlencode', 'digits', 'date'];
+const DATE_OFFSET_RE = /^([+-]?)(\d{1,6})([mhd])$/;
+const DATE_FMTS = ['iso', 'ymd', 'sql', 'epoch'];
+const UNIT_MS = { m: 60_000, h: 3_600_000, d: 86_400_000 };
 
 function getVar(vars, path) {
   const v = getPath(vars, path);
   return v == null ? '' : v;
+}
+
+// The "now" a template run is anchored to: parsed back out of vars.now (an
+// ISO string templateVars derives from the injected nowMs), falling back to
+// the real clock only when vars.now is absent/unparseable (e.g. a test
+// calling renderTemplate directly without building vars via templateVars).
+function helperNowMs(vars) {
+  const iso = vars && vars.now;
+  const t = iso ? Date.parse(iso) : NaN;
+  return Number.isFinite(t) ? t : Date.now();
+}
+
+function formatDateMs(ms, fmt) {
+  if (!Number.isFinite(ms)) return '';
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return '';
+  switch (fmt) {
+    case 'ymd':
+      return d.toISOString().slice(0, 10);
+    case 'sql':
+      return d.toISOString().slice(0, 19).replace('T', ' ');
+    case 'epoch':
+      return String(Math.floor(ms / 1000));
+    case 'iso':
+    default:
+      return d.toISOString();
+  }
+}
+
+// `rest` is everything after "date:" — either `<offset>` or `<offset>:<fmt>`.
+function evalDateHelper(rest, vars) {
+  const idx = rest.indexOf(':');
+  const offsetStr = idx === -1 ? rest : rest.slice(0, idx);
+  const fmt = idx === -1 ? 'iso' : rest.slice(idx + 1);
+  if (!DATE_FMTS.includes(fmt)) return '';
+  const m = DATE_OFFSET_RE.exec(offsetStr);
+  if (!m) return '';
+  const sign = m[1] === '-' ? -1 : 1;
+  const offsetMs = sign * Number(m[2]) * UNIT_MS[m[3]];
+  return formatDateMs(helperNowMs(vars) + offsetMs, fmt);
+}
+
+// resolveHelper(content, vars) -> { value, verbatim } for a recognised
+// helper invocation, or null when `content` isn't a helper call at all (a
+// plain variable path — including the bare `now`, unchanged). An unknown
+// `name:rest` form still counts as "a helper" (so it renders '' rather than
+// falling through to a literal variable lookup on a garbage path).
+function resolveHelper(content, vars) {
+  if (content === 'today') return { value: evalDateHelper('0d:ymd', vars), verbatim: false };
+  const idx = content.indexOf(':');
+  if (idx === -1) return null;
+  const name = content.slice(0, idx);
+  const rest = content.slice(idx + 1);
+  switch (name) {
+    case 'base64':
+      return { value: Buffer.from(String(getVar(vars, rest)), 'utf8').toString('base64'), verbatim: false };
+    case 'lower':
+      return { value: String(getVar(vars, rest)).toLowerCase(), verbatim: false };
+    case 'upper':
+      return { value: String(getVar(vars, rest)).toUpperCase(), verbatim: false };
+    case 'trim':
+      return { value: String(getVar(vars, rest)).trim(), verbatim: false };
+    case 'urlencode':
+      return { value: encodeURIComponent(String(getVar(vars, rest))), verbatim: true };
+    case 'digits':
+      return { value: String(getVar(vars, rest)).replace(/\D/g, ''), verbatim: false };
+    case 'date':
+      return { value: evalDateHelper(rest, vars), verbatim: false };
+    default:
+      return { value: '', verbatim: false }; // unknown helper -> ''
+  }
+}
+
+// findUnknownHelpers(str) -> string[] of distinct unrecognised helper names
+// referenced in `str` (best-effort; used by recipe.js's validateRecipe to
+// flag typos like `{{lowre:input.name}}` in url/headers/bodyTemplate/bodyJson
+// strings). A plain variable path (no `:`) is never a helper and is ignored;
+// `today`/`now` are recognised built-ins, not helpers.
+export function findUnknownHelpers(str) {
+  if (typeof str !== 'string' || !str) return [];
+  const found = new Set();
+  const re = new RegExp(PLACEHOLDER_RE.source, 'g');
+  let m;
+  while ((m = re.exec(str))) {
+    const content = m[1];
+    if (content === 'today' || content === 'now') continue;
+    const idx = content.indexOf(':');
+    if (idx === -1) continue;
+    const name = content.slice(0, idx);
+    if (!KNOWN_HELPERS.includes(name)) found.add(name);
+  }
+  return [...found];
 }
 
 function escapeValue(raw, mode) {
@@ -51,12 +173,19 @@ function escapeValue(raw, mode) {
 export function renderTemplate(str, vars, opts = {}) {
   if (typeof str !== 'string' || !str) return '';
   const escape = opts.escape || 'none';
-  return str.replace(PLACEHOLDER_RE, (_match, path) => {
+  return str.replace(PLACEHOLDER_RE, (_match, content) => {
+    const helper = resolveHelper(content, vars || {});
+    if (helper) {
+      // urlencode is already percent-encoded and inserted as-is regardless
+      // of the surrounding escape mode; every other helper's string result
+      // is escaped per that mode, same as a normal variable value.
+      return helper.verbatim ? helper.value : escapeValue(helper.value, escape);
+    }
     // Operator-declared params (e.g. a base URL / region origin) are trusted
     // configuration, not guest input, so in URL templates they are inserted
     // verbatim — a param may legitimately hold "https://host:port".
-    const mode = escape === 'url' && path.startsWith('param.') ? 'none' : escape;
-    return escapeValue(getVar(vars || {}, path), mode);
+    const mode = escape === 'url' && content.startsWith('param.') ? 'none' : escape;
+    return escapeValue(getVar(vars || {}, content), mode);
   });
 }
 

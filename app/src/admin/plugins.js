@@ -14,11 +14,13 @@ import {
   deletePlugin,
   exportPlugin,
   importPlugin,
+  listRows,
+  replaceListRows,
 } from '../plugins/store.js';
 import { listActiveGrants, revokeGrant } from '../plugins/grants.js';
 import { runLookup, makeTokenCache } from '../plugins/engine.js';
 import { renderTemplate, renderJsonTemplate, templateVars } from '../plugins/template.js';
-import { getPath, parseResponse } from '../plugins/parsers.js';
+import { getPath, parseResponse, parseCsv } from '../plugins/parsers.js';
 import { httpRequest } from '../plugins/http.js';
 import { emptyRecipe } from '../plugins/recipe.js';
 import { logAudit } from './audit.js';
@@ -63,6 +65,8 @@ function acceptHeader(accept) {
       return 'application/xml';
     case 'text':
       return 'text/plain';
+    case 'csv':
+      return 'text/csv, text/plain;q=0.9, */*;q=0.8';
     default:
       return 'application/json';
   }
@@ -83,11 +87,24 @@ function renderHeaders(headerTemplates, vars) {
   return headers;
 }
 
+// Mirrors engine.js's applyBasicAuth for this module's separate (best-effort)
+// request-building pass — see the top-of-file comment for why this exists.
+function applyDebugBasicAuth(headers, basic, vars) {
+  if (!basic) return;
+  for (const k of Object.keys(headers)) {
+    if (k.toLowerCase() === 'authorization') delete headers[k];
+  }
+  const user = renderTemplate(basic.user, vars, { escape: 'none' });
+  const pass = renderTemplate(basic.pass, vars, { escape: 'none' });
+  headers['Authorization'] = `Basic ${Buffer.from(`${user}:${pass}`, 'utf8').toString('base64')}`;
+}
+
 // `r` is a request-shaped block (recipe.request, or the first step's request
 // for a v2 steps-only recipe — see debugFetch).
 function buildDebugRequest(recipe, r, vars) {
   const url = renderTemplate(r.url, vars, { escape: 'url' });
   const headers = renderHeaders(r.headers, vars);
+  applyDebugBasicAuth(headers, r.basic, vars);
   let body;
   if (r.bodyJson !== undefined) {
     const omitEmpty = r.omitEmpty === false ? false : true;
@@ -137,6 +154,7 @@ async function getDebugToken(recipe) {
   const vars = templateVars(recipe, [], '', new Date().toISOString());
   const url = renderTemplate(a.url, vars, { escape: 'url' });
   const headers = renderHeaders(a.headers, vars);
+  applyDebugBasicAuth(headers, a.basic, vars);
   let body;
   if (a.bodyJson !== undefined) {
     const omitEmpty = a.omitEmpty === true; // default false for auth bodies, matching engine.js
@@ -308,15 +326,66 @@ export default async function pluginRoutes(app) {
     return { ...recipe, has_secrets: getPluginSecretsMeta(db, id) };
   });
 
+  // ?includeRows=1 additionally includes a source:'list' plugin's guest-list
+  // rows in the export — off by default since those rows are guest PII.
   app.get('/api/plugins/:id/export', async (req, reply) => {
     const id = Number(req.params.id);
-    const bundle = exportPlugin(db, id);
+    const includeRows = String(req.query?.includeRows || '') === '1';
+    const bundle = exportPlugin(db, id, { includeRows });
     if (!bundle) return reply.code(404).send({ error: 'not found' });
     const safe = safeName(bundle.recipe?.name || `plugin-${id}`);
     reply
       .header('Content-Type', 'application/json')
       .header('Content-Disposition', `attachment; filename="${safe}.tikspot-plugin.json"`)
       .send(JSON.stringify(bundle, null, 2));
+  });
+
+  // ---- Built-in guest-list source (source:'list') ---------------------------
+
+  app.get('/api/plugins/:id/list', async (req, reply) => {
+    const id = Number(req.params.id);
+    const recipe = getPluginPublic(db, id);
+    if (!recipe) return reply.code(404).send({ error: 'not found' });
+    const { count, rows } = listRows(db, id);
+    const columns = rows.length ? Object.keys(rows[0]) : [];
+    return { count, sample: rows.slice(0, 20), columns };
+  });
+
+  // body: { csv: '<text>' } (header row required) or { rows: [{...}, ...] }.
+  // 2 MB body limit (Fastify's fastify-wide default is 1 MB) for a
+  // reasonably large guest list pasted/uploaded as CSV.
+  app.put('/api/plugins/:id/list', { bodyLimit: 2 * 1024 * 1024 }, async (req, reply) => {
+    const id = Number(req.params.id);
+    const recipe = getPluginPublic(db, id);
+    if (!recipe) return reply.code(404).send({ error: 'not found' });
+
+    const body = req.body || {};
+    let rows;
+    let columns;
+    if (typeof body.csv === 'string') {
+      const parsed = parseCsv(body.csv, { header: true });
+      if (!parsed.headers.length) return reply.code(400).send({ error: 'CSV must have a header row' });
+      rows = parsed.rows;
+      columns = parsed.headers;
+    } else if (Array.isArray(body.rows)) {
+      rows = body.rows;
+      columns = rows.length ? Object.keys(rows[0]) : [];
+    } else {
+      return reply.code(400).send({ error: 'expected { csv: "<text>" } or { rows: [...] }' });
+    }
+
+    const result = replaceListRows(db, id, rows);
+    logAudit(db, req, 'plugin.list-replace', `#${id} -> ${result.count} rows`);
+    return { count: result.count, columns };
+  });
+
+  app.delete('/api/plugins/:id/list', async (req, reply) => {
+    const id = Number(req.params.id);
+    const recipe = getPluginPublic(db, id);
+    if (!recipe) return reply.code(404).send({ error: 'not found' });
+    replaceListRows(db, id, []);
+    logAudit(db, req, 'plugin.list-replace', `#${id} -> cleared`);
+    return { ok: true };
   });
 
   app.patch('/api/plugins/:id', async (req, reply) => {
@@ -354,14 +423,18 @@ export default async function pluginRoutes(app) {
       value: inputsBody[inp.name] ?? '',
     }));
 
+    // source:'list' has no HTTP request to run — the engine matches directly
+    // against the plugin's stored guest-list rows.
+    const records = recipe.source === 'list' ? listRows(db, id).rows : undefined;
+
     const start = Date.now();
     let result;
     try {
-      result = await runLookup({ recipe, inputs, tokenCache: makeTokenCache(), diagnostics: true });
+      result = await runLookup({ recipe, inputs, tokenCache: makeTokenCache(), diagnostics: true, records });
     } catch (err) {
       result = { ok: false, reason: 'upstream', detail: String(err?.message || err) };
     }
-    const debug = await debugFetch(recipe, inputs);
+    const debug = recipe.source === 'list' ? { rawExcerpt: undefined, records: (records || []).slice(0, 5) } : await debugFetch(recipe, inputs);
     const ms = Date.now() - start;
 
     logAudit(db, req, 'plugin.test', `#${id} -> ${result.ok ? 'ok' : result.reason}`);

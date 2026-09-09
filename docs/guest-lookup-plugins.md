@@ -9,10 +9,29 @@ current, and admits them onto a plan for the rest of the stay.
 Nothing about the external system is hard-coded: a plugin is a **recipe** you author in
 the admin (Guest lookup tab) describing how to call the API, how to parse the answer, which
 fields identify a guest and which dates bound the stay. For the full field-by-field
-reference (including multi-step lookups, structured JSON bodies, and other advanced
-features), see [`docs/plugins/README.md`](plugins/README.md). Have an **RMS Cloud**
-property? Two ready-made recipes are in the catalog — see
-[`docs/plugins/rms-cloud.md`](plugins/rms-cloud.md).
+reference (including multi-step lookups, structured JSON bodies, pagination, and other
+advanced features), see [`docs/plugins/README.md`](plugins/README.md).
+
+Don't have an API at all? A CSV — a Google Sheet, or one pasted straight into the admin —
+works too; see [`docs/plugins/csv-and-guest-list.md`](plugins/csv-and-guest-list.md).
+
+## Ready-made recipes
+
+The catalog ships recipes for these systems already — install one from **Guest lookup →
+Browse catalog** rather than building from scratch. `Verified` says whether it's been run
+against the real vendor's API (`live`) or built from their docs and tested only against a
+bundled mock (`mock` — still a strong starting point, just verify with **Test lookup**
+first). Full list, plus systems that are documented but not yet shipped as a recipe:
+[`docs/plugins/README.md`](plugins/README.md#supported-systems).
+
+| System | Verified | Docs |
+|---|---|---|
+| RMS Cloud | mock | [`plugins/rms-cloud.md`](plugins/rms-cloud.md) |
+| Mews | live | [`plugins/mews.md`](plugins/mews.md) |
+| Apaleo | mock | [`plugins/apaleo.md`](plugins/apaleo.md) |
+| Cloudbeds | mock | [`plugins/cloudbeds.md`](plugins/cloudbeds.md) |
+| Eventbrite | mock | [`plugins/eventbrite.md`](plugins/eventbrite.md) |
+| CSV / Google Sheet, or built-in guest list | mock | [`plugins/csv-and-guest-list.md`](plugins/csv-and-guest-list.md) |
 
 ## How a login flows
 
@@ -87,3 +106,10 @@ sample data.
 There's a second mock, `examples/rms-mock/`, shaped like the real RMS Cloud API (`npm run
 rms-mock`) — used to develop and test the two RMS Cloud catalog recipes; see
 [`docs/plugins/rms-cloud.md`](plugins/rms-cloud.md).
+
+Each 0.16 recipe has its own bundled mock, too: `examples/mews-mock/` (`npm run
+mews-mock`), `examples/apaleo-mock/` (`npm run apaleo-mock`), `examples/cloudbeds-mock/`
+(`npm run cloudbeds-mock`), `examples/eventbrite-mock/` (`npm run eventbrite-mock`), and
+`examples/csv-guest-list/` (`npm run csv-guest-list`, a static file server for
+`guests.csv`). See each system's doc page (linked in the table above) for sample
+credentials and inputs to try.

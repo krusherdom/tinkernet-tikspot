@@ -151,9 +151,21 @@ GitHub folder, `index.json` or single exported file to use your own catalog.
 - How recipes work: [`docs/guest-lookup-plugins.md`](docs/guest-lookup-plugins.md), field
   reference [`docs/plugins/README.md`](docs/plugins/README.md)
 - Try it with the bundled demo guest API: [`examples/guest-api/`](examples/guest-api/)
-- **RMS Cloud** PMS integration, two ready-made recipes:
-  [`docs/plugins/rms-cloud.md`](docs/plugins/rms-cloud.md) (mock server:
-  [`examples/rms-mock/`](examples/rms-mock/))
+- Ready-made PMS/event recipes — supported-systems matrix in
+  [`docs/plugins/README.md`](docs/plugins/README.md#supported-systems):
+  - **RMS Cloud**: [`docs/plugins/rms-cloud.md`](docs/plugins/rms-cloud.md) (mock:
+    [`examples/rms-mock/`](examples/rms-mock/))
+  - **Mews**: [`docs/plugins/mews.md`](docs/plugins/mews.md) (mock:
+    [`examples/mews-mock/`](examples/mews-mock/))
+  - **Apaleo**: [`docs/plugins/apaleo.md`](docs/plugins/apaleo.md) (mock:
+    [`examples/apaleo-mock/`](examples/apaleo-mock/))
+  - **Cloudbeds**: [`docs/plugins/cloudbeds.md`](docs/plugins/cloudbeds.md) (mock:
+    [`examples/cloudbeds-mock/`](examples/cloudbeds-mock/))
+  - **Eventbrite** attendees: [`docs/plugins/eventbrite.md`](docs/plugins/eventbrite.md)
+    (mock: [`examples/eventbrite-mock/`](examples/eventbrite-mock/))
+  - **CSV / Google Sheet**, or the built-in guest list:
+    [`docs/plugins/csv-and-guest-list.md`](docs/plugins/csv-and-guest-list.md) (mock:
+    [`examples/csv-guest-list/`](examples/csv-guest-list/))
 - Contribute one: [`plugins/README.md`](plugins/README.md)
 
 ## Deploying to a MikroTik
