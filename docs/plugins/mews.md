@@ -124,3 +124,12 @@ match a reservation's guest record.
   if your Mews access spans multiple properties, room names should be unique across them.
 - Mews's public demo is rate-limited; production accounts have their own published rate
   limits — keep `timeoutMs` reasonable for a busy portal.
+
+## Live validation record
+
+On 2026-09-09 the shipped recipe was run unmodified against the public Mews demo
+(`https://api.mews-demo.com`, published demo tokens) with a real assigned reservation's room
+and surname. It matched: the room step returned three same-named resources, the reservation
+step fanned out over all of them and found one, and the guest step filled the name and email.
+The demo rate-limits bursts (HTTP 429), which the engine reports as `upstream`; wait a minute
+and retry.
