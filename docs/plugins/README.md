@@ -62,6 +62,9 @@ load. Everything from here on describes the `recipe` object.
 
 ### Secrets vs. parameters
 
+![Secrets and parameters in the admin](../img/admin-plugin-parameters.png)
+
+
 Two different kinds of "settings a recipe needs", handled very differently:
 
 - **Secrets** (`secretKeys`) — credentials. Write-only: never returned by the API, never
@@ -421,6 +424,9 @@ source's admin upload (`PUT /api/plugins/:id/list`, see below) uses the same `pa
 
 ### Matching — `match`
 
+![Match rules and stay window in the admin](../img/admin-plugin-match-window.png)
+
+
 | Field | Type | Notes |
 |---|---|---|
 | `all` | boolean | default `true` — require every rule to pass (`false` = any one rule) |
@@ -523,6 +529,9 @@ parsing happens at lookup time, same as an `http` recipe's response. A row can c
 extra columns you like beyond what `match`/`window` reference — they're simply ignored.
 
 ### Admin workflow
+
+![Built-in guest list card](../img/admin-guest-list.png)
+
 
 1. **Admin → Guest lookup → (create/edit a plugin) → Basics → Source**: choose "Built-in
    guest list". This hides the Authentication/Secrets/Request/Parser/Multi-step/Parameters

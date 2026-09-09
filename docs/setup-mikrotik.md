@@ -76,6 +76,12 @@ You should see `{"status":"ok","service":"tikspot",...}`.
 
 ## 6. Point the hotspot at Tikspot
 
+The admin's **Router setup** tab can do this section for you (Test connection → Auto-configure
+→ Verify), or generate the equivalent script:
+
+![Router setup tab](img/admin-router-setup.png)
+
+
 **Easiest: use the setup wizard.** Open `http://<container-ip>/admin` — on first run it
 walks you through setting an admin password and (optionally) connecting your MikroTik.
 On the **Router setup** step, enter the router's IP + API credentials, the container IP,
