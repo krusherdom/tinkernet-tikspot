@@ -37,6 +37,10 @@ desktop/mobile preview and a full colour picker. No re-uploading files to the ro
 
 ![Tikspot portal editor](docs/img/portal-editor.png)
 
+Designs are versioned: keep several, publish one, revert to any earlier version.
+
+![Designs tab](docs/img/admin-designs.png)
+
 **The admin** — manage everything from one LAN-only web app.
 
 | | |
@@ -45,6 +49,10 @@ desktop/mobile preview and a full colour picker. No re-uploading files to the ro
 | [![Active users](docs/img/admin-active-users.png)](docs/img/admin-active-users.png) | [![Plans](docs/img/admin-plans.png)](docs/img/admin-plans.png) |
 | **Vouchers** — printable batches with optional date windows | **Router setup** — probe, auto-configure, or copy a manual script |
 | [![Vouchers](docs/img/admin-vouchers.png)](docs/img/admin-vouchers.png) | [![Router setup](docs/img/admin-router-setup.png)](docs/img/admin-router-setup.png) |
+| **Guest lookup** — plugins that check a guest against your PMS, a CSV, or a built-in list | **Plugin catalog** — browse community recipes on GitHub and import in one click |
+| [![Guest lookup](docs/img/admin-guest-lookup.png)](docs/img/admin-guest-lookup.png) | [![Plugin catalog](docs/img/admin-plugin-catalog.png)](docs/img/admin-plugin-catalog.png) |
+| **Settings** — every tunable in one place, with help text | **Help** — a checklist for the MikroTik-side setup traps |
+| [![Settings](docs/img/admin-settings.png)](docs/img/admin-settings.png) | [![Help](docs/img/admin-help.png)](docs/img/admin-help.png) |
 
 ## How it fits together
 
@@ -147,6 +155,13 @@ your own system already holds (room + surname, booking reference, mobile, email�
 Browse catalog** reads its `index.json` and imports a recipe in one click (disabled and
 without secrets until you review it). Point *Settings → Plugin catalog URL* at any
 GitHub folder, `index.json` or single exported file to use your own catalog.
+
+| | |
+|---|---|
+| **Plugin editor** — guided form: source, secrets, parameters, match rules, stay window, guest inputs, messages | **Built-in guest list** — no PMS? Paste a CSV and match against it |
+| [![Plugin editor](docs/img/admin-plugin-editor.png)](docs/img/admin-plugin-editor.png) | [![Guest list](docs/img/admin-guest-list.png)](docs/img/admin-guest-list.png) |
+| **Test panel** — run a lookup with sample inputs and see the parsed records | **Guest lookup block** — drop it into any portal design; the fields come from the plugin |
+| [![Test lookup](docs/img/admin-plugin-test.png)](docs/img/admin-plugin-test.png) | [![Portal editor with guest lookup block](docs/img/portal-editor-guest-lookup.png)](docs/img/portal-editor-guest-lookup.png) |
 
 - How recipes work: [`docs/guest-lookup-plugins.md`](docs/guest-lookup-plugins.md), field
   reference [`docs/plugins/README.md`](docs/plugins/README.md)

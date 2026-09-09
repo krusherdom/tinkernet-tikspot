@@ -88,6 +88,9 @@ must also match.
 
 ## The built-in guest list
 
+![Guest list card in the plugin editor](../img/admin-guest-list.png)
+
+
 For a guest list that doesn't need to live anywhere else — no spreadsheet URL, no server
 — create a plugin with **Source: Built-in guest list** in the admin instead of the usual
 "Guest system over HTTP". There's no Authentication, Request or Parser card for this

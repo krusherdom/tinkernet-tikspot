@@ -15,6 +15,17 @@ advanced features), see [`docs/plugins/README.md`](plugins/README.md).
 Don't have an API at all? A CSV — a Google Sheet, or one pasted straight into the admin —
 works too; see [`docs/plugins/csv-and-guest-list.md`](plugins/csv-and-guest-list.md).
 
+## What it looks like
+
+The admin's **Guest lookup** tab lists your plugins and the catalog browser:
+
+![Guest lookup tab](img/admin-guest-lookup.png)
+
+Guests see the plugin's inputs as a form on the portal page (add a *Guest lookup login* block
+in the portal editor):
+
+<p align="center"><img src="img/portal-guest-lookup-mobile.png" alt="Guest lookup form on a phone" width="300"></p>
+
 ## Ready-made recipes
 
 The catalog ships recipes for these systems already — install one from **Guest lookup →
@@ -32,6 +43,13 @@ first). Full list, plus systems that are documented but not yet shipped as a rec
 | Cloudbeds | mock | [`plugins/cloudbeds.md`](plugins/cloudbeds.md) |
 | Eventbrite | mock | [`plugins/eventbrite.md`](plugins/eventbrite.md) |
 | CSV / Google Sheet, or built-in guest list | mock | [`plugins/csv-and-guest-list.md`](plugins/csv-and-guest-list.md) |
+
+## Adding the block to a design
+
+In the portal editor, add a **Guest lookup login** block and pick the plugin. The form fields
+come from the plugin's *Guest inputs*; the block only owns the intro text and button label.
+
+![Portal editor with a guest lookup block](img/portal-editor-guest-lookup.png)
 
 ## How a login flows
 
@@ -70,7 +88,22 @@ Failures show the recipe's own messages on the login page and are recorded as ev
 The **Raw JSON** toggle shows the same recipe as JSON for copy/paste and sharing;
 **Export** / **Import** move recipes between installs (secrets excluded).
 
+## Editing a recipe in the admin
+
+The guided form covers everything a recipe can express. Secrets are stored separately and
+never shown again; parameters (regions, property IDs) are plain config exported with the
+recipe.
+
+![Plugin editor — basics, authentication, secrets](img/admin-plugin-editor.png)
+
+![Plugin editor — match rules and stay window](img/admin-plugin-match-window.png)
+
+![Plugin editor — parameters and messages](img/admin-plugin-parameters.png)
+
 ## Testing a recipe
+
+![Test panel](img/admin-plugin-test.png)
+
 
 Use **Test lookup** in the plugin editor: enter sample inputs and see the outcome, the
 parsed records, the raw response excerpt and timing. Test before adding the block to the
@@ -79,6 +112,9 @@ the container subnet on the router (Verify flags a missing one) and a reachable 
 System tab's *egress check* can confirm this.
 
 ## Browsing the catalog
+
+![Plugin catalog browser](img/admin-plugin-catalog.png)
+
 
 **Guest lookup → Browse catalog** lists recipes published in the repo's
 [`plugins/`](../plugins/) folder (or wherever *Settings → Plugin catalog URL* points: an

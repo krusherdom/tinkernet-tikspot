@@ -4,6 +4,7 @@
 // (admin/auth.js) requires a session cookie for all of it once setup is
 // complete.
 
+import { listPlugins } from '../plugins/store.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
@@ -204,9 +205,12 @@ export default async function adminRoutes(app) {
     if (!dj.ok) return reply.code(400).send({ error: dj.error });
     const page = ['login', 'status', 'logout'].includes(req.body?.page) ? req.body.page : 'login';
     const model = normalizeDesign(dj.value);
+    const plugins = {};
+    for (const pl of listPlugins(db)) plugins[String(pl.id)] = pl;
     const html = renderPortalPage(model, {
       preview: true,
       page,
+      plugins,
       freeCreds: getJSON(db, 'free_credentials', {}) || {},
     });
     reply.type('text/html').send(html);
