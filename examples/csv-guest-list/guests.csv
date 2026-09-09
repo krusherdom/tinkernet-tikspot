@@ -1,0 +1,6 @@
+first_name,last_name,room,email,mobile,check_in,check_out
+Liam,O'Neill,12,liam.oneill@example.com,+1 555 0101,NOW-1d,NOW+2d
+Priya,Kapoor,12,priya.kapoor@example.com,+1 555 0102,NOW-1d,NOW+2d
+Sofia,Reyes,45,sofia.reyes@example.com,+1 555 0103,NOW-2d,NOW+1d
+"Marcus","Wren, Jr.",7,marcus.wren@example.com,+1 555 0104,NOW+1d,NOW+3d
+Anaya,Fischer,203,anaya.fischer@example.com,+1 555 0105,NOW-10d,NOW-5d

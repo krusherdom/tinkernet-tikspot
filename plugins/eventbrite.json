@@ -1,0 +1,135 @@
+{
+  "format": "tikspot-plugin",
+  "version": 2,
+  "recipe": {
+    "name": "Eventbrite attendees",
+    "enabled": false,
+    "planGroup": "free",
+    "timeoutMs": 8000,
+    "allowInsecureTls": false,
+    "maxRecords": 400,
+    "maxFanOut": 10,
+    "secretKeys": [
+      "token"
+    ],
+    "secretLabels": {
+      "token": "Private token"
+    },
+    "params": {
+      "baseUrl": {
+        "label": "Eventbrite API base URL",
+        "type": "text",
+        "default": "https://www.eventbriteapi.com/v3",
+        "help": "Eventbrite's API origin. For the bundled mock use http://<workstation LAN IP>:8096/v3."
+      },
+      "eventId": {
+        "label": "Event ID",
+        "type": "text",
+        "help": "The numeric ID of the Eventbrite event to check attendees against — find it in the event's URL or the Eventbrite API. Required."
+      }
+    },
+    "paramValues": {},
+    "steps": [
+      {
+        "name": "event",
+        "request": {
+          "method": "GET",
+          "url": "{{param.baseUrl}}/events/{{param.eventId}}/",
+          "headers": {
+            "Authorization": "Bearer {{secret.token}}"
+          },
+          "contentType": "json",
+          "accept": "json"
+        },
+        "parse": {
+          "type": "json",
+          "root": "",
+          "fields": {
+            "eventStart": "start.utc",
+            "eventEnd": "end.utc"
+          },
+          "dateFormat": "iso"
+        },
+        "requireRecords": true
+      },
+      {
+        "name": "attendees",
+        "request": {
+          "method": "GET",
+          "url": "{{param.baseUrl}}/events/{{param.eventId}}/attendees/?status=attending",
+          "headers": {
+            "Authorization": "Bearer {{secret.token}}"
+          },
+          "contentType": "json",
+          "accept": "json"
+        },
+        "parse": {
+          "type": "json",
+          "root": "attendees",
+          "fields": {
+            "firstName": "profile.first_name",
+            "lastName": "profile.last_name",
+            "email": "profile.email",
+            "bookingRef": "order_id",
+            "status": "status"
+          },
+          "dateFormat": "iso"
+        },
+        "paginate": {
+          "cursorPath": "pagination.continuation",
+          "morePath": "pagination.has_more_items",
+          "in": "query",
+          "name": "continuation",
+          "maxPages": 8
+        },
+        "extra": {
+          "checkIn": "{{steps.event.records[0].eventStart}}",
+          "checkOut": "{{steps.event.records[0].eventEnd}}"
+        }
+      }
+    ],
+    "match": {
+      "all": true,
+      "rules": [
+        {
+          "input": "email",
+          "field": "email",
+          "normalize": "email"
+        },
+        {
+          "input": "last_name",
+          "field": "lastName",
+          "normalize": "name"
+        }
+      ],
+      "minRules": 2
+    },
+    "window": {
+      "start": "checkIn",
+      "end": "checkOut",
+      "leewayHours": 6,
+      "maxGrantHours": 24
+    },
+    "inputs": [
+      {
+        "name": "email",
+        "label": "Email",
+        "type": "email",
+        "required": true,
+        "placeholder": "jane@example.com"
+      },
+      {
+        "name": "last_name",
+        "label": "Last name",
+        "type": "text",
+        "required": true,
+        "placeholder": "Smith"
+      }
+    ],
+    "messages": {
+      "noMatch": "We could not find a ticket matching that email and last name.",
+      "outsideWindow": "This event is not currently running.",
+      "upstream": "Eventbrite is not responding — please try again or ask at the check-in desk."
+    }
+  }
+}

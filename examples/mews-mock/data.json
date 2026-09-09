@@ -1,0 +1,62 @@
+{
+  "_comment": "All fictional data. ScheduledStartUtc/ScheduledEndUtc/ActualStartUtc/ActualEndUtc accept a literal ISO string or a relative 'NOW±<N>h' / 'NOW±<N>d' token, resolved once at server startup relative to the instant the process started (see resolveDate() in server.js). Two resources deliberately share the display name '101' with different Ids, mirroring the real Mews Connector demo's behaviour probed 2026-09-09 (see docs/plugins/mews.md).",
+
+  "resources": [
+    { "Id": "r-101-a", "Name": "101", "IsActive": true, "State": "Clean", "ParentResourceId": null },
+    { "Id": "r-101-b", "Name": "101", "IsActive": true, "State": "Dirty", "ParentResourceId": null },
+    { "Id": "r-102", "Name": "Room 102", "IsActive": true, "State": "Clean", "ParentResourceId": null },
+    { "Id": "r-villa7", "Name": "Villa 7", "IsActive": true, "State": "Clean", "ParentResourceId": null },
+    { "Id": "r-203", "Name": "203", "IsActive": true, "State": "Clean", "ParentResourceId": null }
+  ],
+
+  "customers": [
+    { "Id": "acc-1", "FirstName": "Elena", "LastName": "Voss", "Email": "elena.voss@example.com", "Phone": "+43 660 1000001" },
+    { "Id": "acc-2", "FirstName": "Test", "LastName": "Cogifor", "Email": null, "Phone": null },
+    { "Id": "acc-3", "FirstName": "Rowan", "LastName": "Achebe", "Email": "rowan.achebe@example.com", "Phone": "+43 660 1000003" }
+  ],
+
+  "reservations": [
+    {
+      "Id": "resv-1",
+      "Number": "M-1001",
+      "State": "Started",
+      "AccountId": "acc-1",
+      "AssignedResourceId": "r-101-a",
+      "ScheduledStartUtc": "NOW-1d",
+      "ScheduledEndUtc": "NOW+2d",
+      "ActualStartUtc": "NOW-1d",
+      "ActualEndUtc": null,
+      "RequestedResourceCategoryId": "cat-standard",
+      "GroupId": null,
+      "ServiceId": "svc-1"
+    },
+    {
+      "Id": "resv-2",
+      "Number": "M-1002",
+      "State": "Confirmed",
+      "AccountId": "acc-2",
+      "AssignedResourceId": "r-villa7",
+      "ScheduledStartUtc": "NOW+12h",
+      "ScheduledEndUtc": "NOW+4d",
+      "ActualStartUtc": null,
+      "ActualEndUtc": null,
+      "RequestedResourceCategoryId": "cat-villa",
+      "GroupId": null,
+      "ServiceId": "svc-1"
+    },
+    {
+      "Id": "resv-3",
+      "Number": "M-1003",
+      "State": "Processed",
+      "AccountId": "acc-3",
+      "AssignedResourceId": "r-203",
+      "ScheduledStartUtc": "NOW-6d",
+      "ScheduledEndUtc": "NOW-3d",
+      "ActualStartUtc": "NOW-6d",
+      "ActualEndUtc": "NOW-3d",
+      "RequestedResourceCategoryId": "cat-standard",
+      "GroupId": null,
+      "ServiceId": "svc-1"
+    }
+  ]
+}

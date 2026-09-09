@@ -76,13 +76,18 @@ const xmlParser = new XMLParser({
   parseAttributeValue: false,
 });
 
-// parseResponse(recipe.parse, bodyText) -> { records: [{...}], raw }
+// parseResponse(recipe.parse, bodyText, opts) -> { records: [{...}], raw }
 // `raw` is the value found at `parse.root` (before being normalised to an
-// array), useful for debugging/admin preview.
-export function parseResponse(parse, bodyText) {
+// array), useful for debugging/admin preview. `opts.maxRecords`, when given,
+// is honoured by the csv parser only (stops tokenizing once enough data rows
+// are seen, so a huge guest-list export doesn't get fully materialised in
+// memory just to be sliced afterwards) — json/xml/regex are unaffected and
+// keep relying on the engine's own post-parse `maxRecords` slice.
+export function parseResponse(parse, bodyText, opts = {}) {
   const type = parse && parse.type;
   if (type === 'xml') return parseXml(parse, bodyText);
   if (type === 'regex') return parseRegex(parse, bodyText);
+  if (type === 'csv') return parseCsvResponse(parse, bodyText, opts);
   return parseJson(parse, bodyText);
 }
 
@@ -132,6 +137,192 @@ function parseRegex(parse, bodyText) {
     record[canonical] = m ? m[1] : undefined;
   }
   return { records: [record], raw: text };
+}
+
+// ---------------------------------------------------------------------------
+// CSV (0.16): parse.type: 'csv', and the built-in guest-list source's admin
+// upload (PUT /api/plugins/:id/list). RFC-4180-ish: quoted fields (a `"` only
+// opens quoting at the START of a field — a bare quote mid-field, e.g.
+// `12"A`, is literal), doubled quotes inside a quoted field, embedded
+// delimiters/newlines inside quotes, CRLF or LF line endings, an optional
+// leading UTF-8 BOM stripped before parsing.
+
+const CSV_DELIMITERS = [',', ';', '\t', 'auto'];
+
+// Admins typing into a plain text field can't produce a literal tab
+// character, so accept the two-char escape `'\t'` as an alias for a real tab.
+function normalizeDelimiter(d) {
+  if (d === '\\t') return '\t';
+  return CSV_DELIMITERS.includes(d) ? d : ',';
+}
+
+function sniffDelimiter(text) {
+  const firstLine = (text || '').split(/\r\n|\r|\n/)[0] || '';
+  const counts = { ',': 0, ';': 0, '\t': 0 };
+  let inQuotes = false;
+  for (const ch of firstLine) {
+    if (ch === '"') inQuotes = !inQuotes;
+    else if (!inQuotes && ch in counts) counts[ch] += 1;
+  }
+  let best = ',';
+  let bestCount = -1;
+  for (const [d, c] of Object.entries(counts)) {
+    if (c > bestCount) {
+      best = d;
+      bestCount = c;
+    }
+  }
+  return best;
+}
+
+// Tokenizes raw CSV text into rows of raw string cells (no header handling).
+// `rowCap`, when finite, stops scanning once that many rows (including a
+// header row, if any — the caller passes the right count) have been
+// produced.
+function tokenizeCsv(text, delimiter, quote, rowCap) {
+  const rows = [];
+  let row = [];
+  let field = '';
+  let inQuotes = false;
+  const n = text.length;
+  let i = 0;
+  while (i < n) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === quote) {
+        if (text[i + 1] === quote) {
+          field += quote;
+          i += 2;
+          continue;
+        }
+        inQuotes = false;
+        i += 1;
+        continue;
+      }
+      field += ch;
+      i += 1;
+      continue;
+    }
+    // A quote only opens quoting at the very start of a field — a bare quote
+    // mid-field (`12"A`) is literal, not a syntax error.
+    if (ch === quote && field === '') {
+      inQuotes = true;
+      i += 1;
+      continue;
+    }
+    if (ch === delimiter) {
+      row.push(field);
+      field = '';
+      i += 1;
+      continue;
+    }
+    if (ch === '\r' || ch === '\n') {
+      if (ch === '\r' && text[i + 1] === '\n') i += 1;
+      row.push(field);
+      field = '';
+      rows.push(row);
+      row = [];
+      i += 1;
+      if (Number.isFinite(rowCap) && rows.length >= rowCap) return rows;
+      continue;
+    }
+    field += ch;
+    i += 1;
+  }
+  if (field !== '' || row.length > 0) {
+    row.push(field);
+    rows.push(row);
+  }
+  return rows;
+}
+
+// parseCsv(text, opts) -> { headers, rows }
+//   opts.delimiter  ',' (default) | ';' | '\t' | '\\t' | 'auto'
+//   opts.header     default true — first row is column names
+//   opts.skipEmpty  default true — drop fully-blank lines
+//   opts.quote      default '"' (single character)
+//   opts.maxRows    optional cap on DATA rows returned (stops tokenizing early)
+// `headers` is the column-name list (or `#0`, `#1`, ... when `header:false`).
+// `rows` is an array of plain objects keyed by `headers`. Exported for reuse
+// by the built-in guest-list source's admin upload endpoint.
+export function parseCsv(text, opts = {}) {
+  const quote = typeof opts.quote === 'string' && opts.quote.length === 1 ? opts.quote : '"';
+  let s = text || '';
+  if (s.charCodeAt(0) === 0xfeff) s = s.slice(1);
+
+  let delimiter = normalizeDelimiter(opts.delimiter);
+  if (delimiter === 'auto') delimiter = sniffDelimiter(s);
+
+  const header = opts.header === undefined ? true : !!opts.header;
+  const skipEmpty = opts.skipEmpty === undefined ? true : !!opts.skipEmpty;
+  const maxRows = Number.isFinite(opts.maxRows) && opts.maxRows >= 0 ? opts.maxRows : Infinity;
+  const rowCap = Number.isFinite(maxRows) ? maxRows + (header ? 1 : 0) : Infinity;
+
+  let table = tokenizeCsv(s, delimiter, quote, rowCap);
+  if (skipEmpty) table = table.filter((row) => !(row.length === 1 && row[0].trim() === ''));
+
+  let headers;
+  let dataRows;
+  if (header) {
+    headers = (table[0] || []).map((h) => h.trim());
+    dataRows = table.slice(1);
+  } else {
+    const width = table.reduce((m, r) => Math.max(m, r.length), 0);
+    headers = Array.from({ length: width }, (_, i) => `#${i}`);
+    dataRows = table;
+  }
+  if (Number.isFinite(maxRows)) dataRows = dataRows.slice(0, maxRows);
+
+  const rows = dataRows.map((cells) => {
+    const obj = {};
+    headers.forEach((h, i) => {
+      obj[h] = cells[i] !== undefined ? cells[i] : '';
+    });
+    return obj;
+  });
+
+  return { headers, rows };
+}
+
+// mapCsvFields(row, headers, fieldsMap) -> { canonicalOrCustomName: value }
+// `fieldsMap` values are column names (case-insensitive match against
+// `headers`) or `#<index>` (0-based, always valid since `header:false` rows
+// are themselves keyed `#0`, `#1`, ...). An empty/absent fieldsMap passes the
+// row through as-is (columns used verbatim) — used by both the csv parser
+// and the built-in guest-list source (engine.js).
+export function mapCsvFields(row, headers, fieldsMap) {
+  if (!fieldsMap || !Object.keys(fieldsMap).length) return { ...row };
+  const lowerToActual = {};
+  for (const h of headers || Object.keys(row)) lowerToActual[String(h).toLowerCase()] = h;
+  const out = {};
+  for (const [canonical, spec] of Object.entries(fieldsMap)) {
+    if (typeof spec !== 'string') {
+      out[canonical] = undefined;
+      continue;
+    }
+    const idxMatch = /^#(\d+)$/.exec(spec);
+    if (idxMatch) {
+      const h = (headers || [])[Number(idxMatch[1])];
+      out[canonical] = h !== undefined ? row[h] : undefined;
+      continue;
+    }
+    const actual = lowerToActual[spec.toLowerCase()];
+    out[canonical] = actual !== undefined ? row[actual] : undefined;
+  }
+  return out;
+}
+
+function parseCsvResponse(parse, bodyText, opts = {}) {
+  const { headers, rows } = parseCsv(bodyText || '', {
+    delimiter: parse && parse.delimiter,
+    header: parse ? parse.header : undefined,
+    skipEmpty: parse ? parse.skipEmpty : undefined,
+    quote: parse && parse.quote,
+    maxRows: opts && opts.maxRecords,
+  });
+  const fieldsMap = (parse && parse.fields) || {};
+  const records = rows.map((row) => mapCsvFields(row, headers, fieldsMap));
+  return { records, raw: rows };
 }
 
 // parseDate(value, dateFormat) -> epoch ms, or null if unparseable/absent.

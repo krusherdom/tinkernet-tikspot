@@ -19,6 +19,11 @@ review the URLs, add credentials, run **Test lookup**, then enable.
 | `demo-hotel-regex.json` | Demo hotel API, plain text parsed with a named-group regex |
 | `rms-cloud-surname-room.json` | RMS Cloud (real PMS), room + surname |
 | `rms-cloud-any-detail.json` | RMS Cloud (real PMS), room + any one of last name / first name / email / mobile (multi-step) |
+| `mews-connector.json` | Mews Connector API (real PMS), room + any guest detail (multi-step, embedded tokens) |
+| `apaleo.json` | Apaleo (real PMS), room + any guest detail (OAuth2 + HTTP Basic auth) |
+| `cloudbeds.json` | Cloudbeds (real PMS), room + any guest detail (static API key) |
+| `csv-url.json` | Any CSV over HTTP (e.g. a published Google Sheet), room + any guest detail, no login |
+| `eventbrite.json` | Eventbrite attendees, email + last name (multi-step, pagination) |
 
 The three demo files target `examples/guest-api/` (run `npm run guest-api` on a machine
 the router's container can reach, then change the recipe's host to that machine's LAN IP).
@@ -27,6 +32,28 @@ The two RMS Cloud recipes target the real [RMS Hospitality](https://www.rmscloud
 REST API — see [`docs/plugins/rms-cloud.md`](../docs/plugins/rms-cloud.md) for
 prerequisites, setup, and how to try them against the bundled mock
 (`examples/rms-mock/`) before you have real credentials.
+
+The five 0.16 recipes each have their own doc page under
+[`docs/plugins/`](../docs/plugins/) (`mews.md`, `apaleo.md`, `cloudbeds.md`,
+`csv-and-guest-list.md`, `eventbrite.md`) with prerequisites, setup, and a bundled mock to
+try before you have real credentials. See
+[`docs/plugins/README.md`](../docs/plugins/README.md#supported-systems) for the full
+supported-systems matrix, including PMSs that are documented but not yet shipped as a
+recipe.
+
+### The `verified` field
+
+Every catalog entry in `index.json` carries `"verified": "live" | "mock"`:
+
+- **`live`** — the recipe has actually been run against the real vendor's API (even a
+  public demo/sandbox), not just a bundled mock.
+- **`mock`** — the recipe is built from the vendor's published API docs and tested against
+  a bundled mock that mirrors those docs, but has **not** been run against the real
+  service. Treat it as a strong starting point: verify with **Test lookup** against your
+  own account before relying on it, and please report back anything that doesn't match —
+  vendor APIs occasionally vary by account/version.
+
+Each recipe's own `description` field, and its doc page, restate this plainly.
 
 ## Pointing Tikspot at a different catalog
 

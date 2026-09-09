@@ -1,0 +1,139 @@
+{
+  "format": "tikspot-plugin",
+  "version": 2,
+  "recipe": {
+    "name": "Cloudbeds",
+    "enabled": false,
+    "planGroup": "free",
+    "timeoutMs": 8000,
+    "allowInsecureTls": false,
+    "maxRecords": 200,
+    "maxFanOut": 10,
+    "secretKeys": [
+      "apiKey"
+    ],
+    "secretLabels": {
+      "apiKey": "API key"
+    },
+    "params": {
+      "baseUrl": {
+        "label": "Cloudbeds API base URL",
+        "type": "text",
+        "default": "https://api.cloudbeds.com/api/v1.3",
+        "help": "Cloudbeds REST API origin, including its version path. For the bundled mock use http://<workstation LAN IP>:8095/api/v1.3."
+      },
+      "propertyId": {
+        "label": "Property ID",
+        "type": "text",
+        "help": "The Cloudbeds property ID this recipe searches. Find it in Cloudbeds under Property settings, or in the partner sandbox dashboard."
+      }
+    },
+    "paramValues": {},
+    "request": {
+      "method": "GET",
+      "url": "{{param.baseUrl}}/getReservations?propertyID={{param.propertyId}}&status=checked_in&roomName={{input.room}}&includeGuestsDetails=true&pageSize=100",
+      "headers": {
+        "x-api-key": "{{secret.apiKey}}"
+      },
+      "contentType": "json",
+      "accept": "json"
+    },
+    "parse": {
+      "type": "json",
+      "root": "data[*].guestList[*]",
+      "fields": {
+        "firstName": "guestFirstName",
+        "lastName": "guestLastName",
+        "email": "guestEmail",
+        "mobile": "guestCellPhone",
+        "phone": "guestPhone",
+        "room": "roomName",
+        "checkIn": "startDate",
+        "checkOut": "endDate"
+      },
+      "dateFormat": "ymd"
+    },
+    "match": {
+      "all": true,
+      "rules": [
+        {
+          "input": "room",
+          "field": "room",
+          "normalize": "digits"
+        },
+        {
+          "input": "last_name",
+          "field": "lastName",
+          "normalize": "name"
+        },
+        {
+          "input": "first_name",
+          "field": "firstName",
+          "normalize": "name"
+        },
+        {
+          "input": "email",
+          "field": "email",
+          "normalize": "email"
+        },
+        {
+          "input": "mobile",
+          "anyOf": [
+            "mobile",
+            "phone"
+          ],
+          "normalize": "phone"
+        }
+      ],
+      "minRules": 2
+    },
+    "window": {
+      "start": "checkIn",
+      "end": "checkOut",
+      "leewayHours": 24,
+      "maxGrantHours": 168
+    },
+    "inputs": [
+      {
+        "name": "room",
+        "label": "Room number",
+        "type": "text",
+        "required": true,
+        "placeholder": "e.g. 101"
+      },
+      {
+        "name": "last_name",
+        "label": "Last name",
+        "type": "text",
+        "required": false,
+        "placeholder": "Smith"
+      },
+      {
+        "name": "first_name",
+        "label": "First name",
+        "type": "text",
+        "required": false,
+        "placeholder": "Jane"
+      },
+      {
+        "name": "email",
+        "label": "Email",
+        "type": "email",
+        "required": false,
+        "placeholder": "jane@example.com"
+      },
+      {
+        "name": "mobile",
+        "label": "Mobile number",
+        "type": "tel",
+        "required": false,
+        "placeholder": "+1 555 0100"
+      }
+    ],
+    "messages": {
+      "noMatch": "We could not find a Cloudbeds reservation matching that room and guest detail.",
+      "outsideWindow": "That Cloudbeds reservation's stay is not active yet, or has already ended.",
+      "upstream": "Cloudbeds is not responding — please try again or ask at the front desk."
+    }
+  }
+}

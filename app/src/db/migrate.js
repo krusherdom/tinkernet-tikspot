@@ -7,7 +7,7 @@ import fs from 'node:fs';
 const radiusSchema = fs.readFileSync(new URL('./schema-radius.sql', import.meta.url), 'utf8');
 const appSchema = fs.readFileSync(new URL('./schema-app.sql', import.meta.url), 'utf8');
 
-const SCHEMA_VERSION = '7';
+const SCHEMA_VERSION = '8';
 
 // Add a column to a table only if it's missing (CREATE IF NOT EXISTS won't add
 // columns to a pre-existing table).

@@ -206,3 +206,18 @@ CREATE TABLE IF NOT EXISTS plugin_grants (
 	active      INTEGER NOT NULL DEFAULT 1
 );
 CREATE INDEX IF NOT EXISTS plugin_grants_active ON plugin_grants(active, expires_at);
+
+-- Built-in guest-list source (Stage 0.16): one row per guest-list entry for a
+-- `source: 'list'` plugin, uploaded as CSV via the admin (PUT
+-- /api/plugins/:id/list — see app/src/plugins/{parsers,store}.js). `row_json`
+-- is a plain object of string column values keyed by the CSV's own header
+-- names. This IS config (not accounting/audit history), so it's kept in a
+-- config-only backup and only wiped when the plugin itself is deleted
+-- (ON DELETE CASCADE — see app/src/db/index.js's `PRAGMA foreign_keys = ON`).
+CREATE TABLE IF NOT EXISTS plugin_list_rows (
+	id         INTEGER PRIMARY KEY AUTOINCREMENT,
+	plugin_id  INTEGER NOT NULL REFERENCES plugins(id) ON DELETE CASCADE,
+	row_json   TEXT NOT NULL,
+	created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS plugin_list_rows_plugin ON plugin_list_rows(plugin_id);

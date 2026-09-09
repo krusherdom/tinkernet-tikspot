@@ -1,0 +1,112 @@
+{
+  "format": "tikspot-plugin",
+  "version": 2,
+  "recipe": {
+    "name": "CSV / Google Sheet guest list",
+    "enabled": false,
+    "planGroup": "free",
+    "timeoutMs": 8000,
+    "allowInsecureTls": false,
+    "maxRecords": 2000,
+    "maxFanOut": 10,
+    "secretKeys": [],
+    "secretLabels": {},
+    "params": {
+      "csvUrl": {
+        "label": "CSV URL",
+        "type": "text",
+        "help": "A direct link to a CSV file: a Google Sheet published as CSV (File → Share → Publish to web → choose the sheet → CSV), or any URL that returns text/csv. No authentication is sent with this request — use a link that doesn't require a login."
+      }
+    },
+    "paramValues": {},
+    "request": {
+      "method": "GET",
+      "url": "{{param.csvUrl}}",
+      "headers": {},
+      "contentType": "json",
+      "accept": "csv"
+    },
+    "parse": {
+      "type": "csv",
+      "header": true,
+      "delimiter": "auto",
+      "fields": {
+        "firstName": "first_name",
+        "lastName": "last_name",
+        "room": "room",
+        "email": "email",
+        "mobile": "mobile",
+        "checkIn": "check_in",
+        "checkOut": "check_out"
+      },
+      "dateFormat": "ymd"
+    },
+    "match": {
+      "all": true,
+      "rules": [
+        {
+          "input": "room",
+          "field": "room",
+          "normalize": "digits"
+        },
+        {
+          "input": "last_name",
+          "field": "lastName",
+          "normalize": "name"
+        },
+        {
+          "input": "email",
+          "field": "email",
+          "normalize": "email"
+        },
+        {
+          "input": "mobile",
+          "field": "mobile",
+          "normalize": "phone"
+        }
+      ],
+      "minRules": 2
+    },
+    "window": {
+      "start": "checkIn",
+      "end": "checkOut",
+      "leewayHours": 24,
+      "maxGrantHours": 168
+    },
+    "inputs": [
+      {
+        "name": "room",
+        "label": "Room / site number",
+        "type": "text",
+        "required": true,
+        "placeholder": "e.g. 101"
+      },
+      {
+        "name": "last_name",
+        "label": "Last name",
+        "type": "text",
+        "required": false,
+        "placeholder": "Smith"
+      },
+      {
+        "name": "email",
+        "label": "Email",
+        "type": "email",
+        "required": false,
+        "placeholder": "jane@example.com"
+      },
+      {
+        "name": "mobile",
+        "label": "Mobile number",
+        "type": "tel",
+        "required": false,
+        "placeholder": "+1 555 0100"
+      }
+    ],
+    "messages": {
+      "noMatch": "We could not find a guest matching that room and detail on the guest list.",
+      "outsideWindow": "That guest's stay is not active yet, or has already ended.",
+      "upstream": "The guest list could not be loaded — please try again or ask at the front desk."
+    }
+  }
+}

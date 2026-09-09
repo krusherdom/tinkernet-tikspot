@@ -10,6 +10,20 @@
 // failure (plus an opt-in `steps` diagnostics array — see `diagnostics`
 // below). The DB-backed RADIUS credential minting is NOT this module's job;
 // the caller does that with the returned `expiresAt`.
+//
+// 0.16 additions:
+//   - auth.basic / request.basic / steps[].request.basic: declarative HTTP
+//     Basic auth (see applyBasicAuth below).
+//   - source:'list': no HTTP at all — the caller supplies `records` (see
+//     runLookup's `records` param) and the engine just maps/matches/windows
+//     them, exactly like an http recipe's final step would.
+//   - steps[].requireRecords (recipe.requireRecords for the top-level
+//     request form): fail fast with reason:'no-match' when a step yields
+//     zero records, instead of letting an unfiltered later step run.
+//   - steps[].paginate (request.paginate for the top-level form): repeats a
+//     step's request, following a cursor, accumulating records.
+//   - steps[].extra: templated fields stamped onto every record a step
+//     produced.
 
 import { renderTemplate, renderJsonTemplate, templateVars } from './template.js';
 import { getPath, parseResponse, parseDate } from './parsers.js';
@@ -50,6 +64,8 @@ function acceptHeader(accept) {
       return 'application/xml';
     case 'text':
       return 'text/plain';
+    case 'csv':
+      return 'text/csv, text/plain;q=0.9, */*;q=0.8';
     case 'json':
     default:
       return 'application/json';
@@ -71,10 +87,28 @@ function renderHeaders(headerTemplates, vars) {
   return headers;
 }
 
+// Declarative HTTP Basic auth (`auth.basic` / `request.basic` /
+// `steps[].request.basic`): sets `Authorization: Basic base64(user:pass)`.
+// Applied AFTER the request's own templated headers, replacing any existing
+// (case-insensitive) Authorization header — but BEFORE token placement, so a
+// token placement that also targets Authorization wins (documented in
+// docs/plugins/README.md). user/pass render with escape 'none'; template.js's
+// escapeValue always strips CR/LF regardless of mode.
+function applyBasicAuth(headers, basic, vars) {
+  if (!basic) return;
+  for (const k of Object.keys(headers)) {
+    if (k.toLowerCase() === 'authorization') delete headers[k];
+  }
+  const user = renderTemplate(basic.user, vars, { escape: 'none' });
+  const pass = renderTemplate(basic.pass, vars, { escape: 'none' });
+  headers['Authorization'] = `Basic ${Buffer.from(`${user}:${pass}`, 'utf8').toString('base64')}`;
+}
+
 function buildStepRequest(recipe, step, vars) {
   const r = step.request;
   const url = renderTemplate(r.url, vars, { escape: 'url' });
   const headers = renderHeaders(r.headers, vars);
+  applyBasicAuth(headers, r.basic, vars);
 
   let body;
   if (r.bodyJson !== undefined) {
@@ -98,6 +132,36 @@ function buildStepRequest(recipe, step, vars) {
     timeoutMs: recipe.timeoutMs || 8000,
     insecureTls: !!recipe.allowInsecureTls,
   };
+}
+
+// steps[].paginate / request.paginate: adds the cursor value from the
+// previous page onto the SAME request — a query param, or a top-level key
+// merged into a JSON request body — before it's fired again. Best-effort:
+// a non-JSON body silently skips body-placement (matches
+// applyTokenPlacement's own best-effort body handling below).
+function applyPaginationCursor(req, paginate, cursorValue) {
+  if (cursorValue === undefined || cursorValue === null) return req;
+  const name = paginate.name;
+  if (paginate.in === 'body') {
+    try {
+      const parsed = req.body ? JSON.parse(req.body) : {};
+      if (parsed && typeof parsed === 'object') {
+        parsed[name] = cursorValue;
+        req.body = JSON.stringify(parsed);
+      }
+    } catch {
+      // not JSON — nothing sensible to do
+    }
+    return req;
+  }
+  try {
+    const u = new URL(req.url);
+    u.searchParams.set(name, String(cursorValue));
+    req.url = u.toString();
+  } catch {
+    // invalid URL — leave it be, the request will fail naturally
+  }
+  return req;
 }
 
 // Attaches the auth token to the already-built guest-lookup request per
@@ -162,6 +226,7 @@ async function fetchToken(recipe, http, tokenCache, nowMs, inputs, forceRefresh)
   const vars = templateVars(recipe, inputs, '', new Date(nowMs).toISOString());
   const url = renderTemplate(authCfg.url, vars, { escape: 'url' });
   const headers = renderHeaders(authCfg.headers, vars);
+  applyBasicAuth(headers, authCfg.basic, vars);
 
   let body;
   if (authCfg.bodyJson !== undefined) {
@@ -226,25 +291,28 @@ function stepVars(recipe, inputs, token, nowIso, stepResults, record) {
 }
 
 // Fires one HTTP request for `step` (optionally bound to a forEach `record`),
-// counting it against the shared per-lookup request cap. Throws a
-// REQUEST_CAP-coded error instead of firing once the cap is reached.
-async function fireStep(recipe, step, vars, http, requestState) {
+// counting it against the shared per-lookup request cap. `cursor`, when
+// given, is a pagination cursor value applied via `step.paginate` — see
+// applyPaginationCursor. Throws a REQUEST_CAP-coded error instead of firing
+// once the cap is reached.
+async function fireStep(recipe, step, vars, http, requestState, cursor) {
   if (requestState.n >= requestState.cap) {
     throw Object.assign(new Error('request cap exceeded'), { code: 'REQUEST_CAP' });
   }
   requestState.n += 1;
-  const req = applyTokenPlacement(buildStepRequest(recipe, step, vars), vars.token, recipe.auth && recipe.auth.placement);
+  let req = applyTokenPlacement(buildStepRequest(recipe, step, vars), vars.token, recipe.auth && recipe.auth.placement);
+  if (cursor !== undefined && step.paginate) req = applyPaginationCursor(req, step.paginate, cursor);
   return http(req);
 }
 
 // Fires a step's request, retrying once (with a freshly-minted token) if the
 // response is 401/403 AND the token we used came from the cache (a token we
 // *just* minted this run failing again isn't worth a second round-trip).
-async function fireStepWithReauth({ recipe, step, inputs, nowMs, nowIso, stepResults, record, token, tokenFromCache, http, tokenCache, requestState }) {
+async function fireStepWithReauth({ recipe, step, inputs, nowMs, nowIso, stepResults, record, token, tokenFromCache, http, tokenCache, requestState, cursor }) {
   let currentToken = token;
   let currentFromCache = tokenFromCache;
   let vars = stepVars(recipe, inputs, currentToken, nowIso, stepResults, record);
-  let res = await fireStep(recipe, step, vars, http, requestState);
+  let res = await fireStep(recipe, step, vars, http, requestState, cursor);
 
   if ((res.status === 401 || res.status === 403) && recipe.auth && currentFromCache) {
     if (tokenCache && typeof tokenCache.delete === 'function') tokenCache.delete(tokenCacheKey(recipe));
@@ -252,7 +320,7 @@ async function fireStepWithReauth({ recipe, step, inputs, nowMs, nowIso, stepRes
     currentToken = refreshed.token;
     currentFromCache = false;
     vars = stepVars(recipe, inputs, currentToken, nowIso, stepResults, record);
-    res = await fireStep(recipe, step, vars, http, requestState);
+    res = await fireStep(recipe, step, vars, http, requestState, cursor);
   }
 
   return { res, token: currentToken, fromCache: currentFromCache };
@@ -275,9 +343,47 @@ function withSteps(result, diagnostics, stepDiag) {
   return { ...result, steps: stepDiag };
 }
 
-// runLookup({ recipe, inputs, now, http, tokenCache, diagnostics })
+// steps[].extra: { fieldName: template } — rendered ONCE per step (not per
+// record, so `record.*` isn't in scope — only `input`/`secret`/`param`/
+// `now`/`steps`/`token`) and stamped onto every record that step produced,
+// overwriting any existing value of the same name.
+function applyStepExtra(recipe, step, inputs, token, nowIso, stepResults) {
+  const extra = step.extra;
+  if (!extra) return;
+  const names = Object.keys(extra);
+  if (!names.length) return;
+  const vars = stepVars(recipe, inputs, token, nowIso, stepResults, undefined);
+  const rendered = {};
+  for (const name of names) rendered[name] = renderTemplate(String(extra[name]), vars, { escape: 'none' });
+  const records = (stepResults[step.name] && stepResults[step.name].records) || [];
+  for (const rec of records) {
+    for (const name of names) rec[name] = rendered[name];
+  }
+}
+
+// source:'list' field mapping: `fieldsMap` values are column names, matched
+// case-insensitively against the row's own keys (list rows always come from
+// a header:true CSV upload — see store.replaceListRows/parsers.parseCsv).
+// An empty/absent fieldsMap passes the row through as-is.
+function mapListRowFields(row, fieldsMap) {
+  if (!fieldsMap || !Object.keys(fieldsMap).length) return { ...row };
+  const lowerToActual = {};
+  for (const k of Object.keys(row || {})) lowerToActual[k.toLowerCase()] = k;
+  const out = {};
+  for (const [canonical, colName] of Object.entries(fieldsMap)) {
+    if (typeof colName !== 'string') {
+      out[canonical] = undefined;
+      continue;
+    }
+    const actual = lowerToActual[colName.toLowerCase()];
+    out[canonical] = actual !== undefined ? row[actual] : undefined;
+  }
+  return out;
+}
+
+// runLookup({ recipe, inputs, now, http, tokenCache, diagnostics, records })
 //   recipe:      a validated recipe (see recipe.js) — v1 (single request+
-//                parse) or v2 (steps[])
+//                parse), v2 (steps[]), or source:'list' (no HTTP at all)
 //   inputs:      the guest's submitted answers — array-of-recipe.inputs-with-
 //                `value`, or a plain { name: value } object (see template.js)
 //   now:         epoch ms (defaults to Date.now()) — inject for deterministic tests
@@ -287,10 +393,42 @@ function withSteps(result, diagnostics, stepDiag) {
 //                the result (records is a count, never the response body) —
 //                used by the admin "test this recipe" endpoint only, never
 //                by the portal lookup path.
+//   records:     source:'list' ONLY — the plugin's guest-list rows (plain
+//                objects), typically `store.listRows(db, recipe.id).rows`;
+//                ignored for http recipes.
 //
 // -> { ok:true, guest:{label, record}, expiresAt }
 // -> { ok:false, reason:'timeout'|'upstream'|'no-match'|'outside-window', ... }
-export async function runLookup({ recipe, inputs = [], now, http = defaultHttpRequest, tokenCache, diagnostics = false } = {}) {
+export async function runLookup({ recipe, inputs = [], now, http = defaultHttpRequest, tokenCache, diagnostics = false, records } = {}) {
+  const nowMsList = now ?? Date.now();
+
+  if (recipe.source === 'list') {
+    const t0 = Date.now();
+    const fieldsMap = (recipe.parse && recipe.parse.fields) || {};
+    const rawRows = Array.isArray(records) ? records : [];
+    const mapped = rawRows.map((row) => mapListRowFields(row, fieldsMap));
+    const cap = recipe.maxRecords ?? 200;
+    const candidateRecords = mapped.slice(0, cap);
+    const stepDiag = [{ name: 'list', status: 'ok', ms: Date.now() - t0, records: candidateRecords.length }];
+
+    const guestRecord = findGuest(recipe.match, candidateRecords, inputs);
+    if (!guestRecord) return withSteps({ ok: false, reason: 'no-match' }, diagnostics, stepDiag);
+
+    const boundParseDate = (v) => parseDate(v, recipe.parse && recipe.parse.dateFormat);
+    const win = inWindow(recipe.window, guestRecord, nowMsList, boundParseDate);
+    if (!win.ok) return withSteps({ ok: false, reason: 'outside-window', detail: win.reason }, diagnostics, stepDiag);
+
+    return withSteps(
+      { ok: true, guest: { label: guestLabel(guestRecord), record: guestRecord }, expiresAt: win.expiresAt },
+      diagnostics,
+      stepDiag,
+    );
+  }
+
+  return runHttpLookup({ recipe, inputs, now, http, tokenCache, diagnostics });
+}
+
+async function runHttpLookup({ recipe, inputs = [], now, http = defaultHttpRequest, tokenCache, diagnostics = false } = {}) {
   const nowMs = now ?? Date.now();
   const nowIso = new Date(nowMs).toISOString();
 
@@ -306,10 +444,22 @@ export async function runLookup({ recipe, inputs = [], now, http = defaultHttpRe
     }
   }
 
+  // The synthesized main step picks up the top-level (recipe.requireRecords)
+  // and request-nested (recipe.request.paginate) forms so the per-step
+  // processing below only ever has to look at `step.requireRecords` /
+  // `step.paginate` — see recipe.js for why the two forms' shapes differ.
   const steps =
     Array.isArray(recipe.steps) && recipe.steps.length
       ? recipe.steps
-      : [{ name: 'main', request: recipe.request, parse: recipe.parse }];
+      : [
+          {
+            name: 'main',
+            request: recipe.request,
+            parse: recipe.parse,
+            requireRecords: !!recipe.requireRecords,
+            paginate: recipe.request && recipe.request.paginate,
+          },
+        ];
 
   const maxFanOut = Number.isFinite(recipe.maxFanOut) && recipe.maxFanOut > 0 ? recipe.maxFanOut : 10;
   const requestState = { n: 0, cap: REQUEST_CAP };
@@ -388,43 +538,87 @@ export async function runLookup({ recipe, inputs = [], now, http = defaultHttpRe
       }
 
       stepResults[step.name] = { records: parents };
+      applyStepExtra(recipe, step, inputs, token, nowIso, stepResults);
       stepDiag.push({ name: step.name, status: 'ok', ms: Date.now() - t0, records: parents.length });
+      if (step.requireRecords && parents.length === 0) {
+        return withSteps({ ok: false, reason: 'no-match', detail: `step:${step.name}` }, diagnostics, stepDiag);
+      }
     } else {
       try {
-        const fired = await fireStepWithReauth({
-          recipe,
-          step,
-          inputs,
-          nowMs,
-          nowIso,
-          stepResults,
-          record: undefined,
-          token,
-          tokenFromCache,
-          http,
-          tokenCache,
-          requestState,
-        });
-        token = fired.token;
-        tokenFromCache = fired.fromCache;
-
-        if (fired.res.status < 200 || fired.res.status >= 300) {
-          throw Object.assign(new Error(`step "${step.name}" failed with status ${fired.res.status}`), {
-            code: 'STEP_HTTP',
-            status: fired.res.status,
+        // Non-paginated steps run this loop body exactly once (maxPages
+        // defaults to 1 when step.paginate is absent) — same single request
+        // as before 0.16. A paginated step repeats the SAME request, adding
+        // the previous page's cursor, accumulating records, until it runs
+        // out of pages, cursor, maxRecords, or the global request cap.
+        const maxPages = (step.paginate && step.paginate.maxPages) || 1;
+        let allRecords = [];
+        let pages = 0;
+        let cursorValue;
+        for (;;) {
+          pages += 1;
+          const fired = await fireStepWithReauth({
+            recipe,
+            step,
+            inputs,
+            nowMs,
+            nowIso,
+            stepResults,
+            record: undefined,
+            token,
+            tokenFromCache,
+            http,
+            tokenCache,
+            requestState,
+            cursor: cursorValue,
           });
+          token = fired.token;
+          tokenFromCache = fired.fromCache;
+
+          if (fired.res.status < 200 || fired.res.status >= 300) {
+            throw Object.assign(new Error(`step "${step.name}" failed with status ${fired.res.status}`), {
+              code: 'STEP_HTTP',
+              status: fired.res.status,
+            });
+          }
+          let parsed;
+          try {
+            parsed = parseResponse(step.parse, fired.res.text);
+          } catch {
+            throw Object.assign(new Error(`step "${step.name}" response could not be parsed`), { code: 'STEP_PARSE' });
+          }
+          allRecords = allRecords.concat(parsed.records || []);
+          lastParse = step.parse;
+
+          if (!step.paginate) break;
+          if (pages >= maxPages) break;
+          if (requestState.n >= requestState.cap) break;
+          if (recipe.maxRecords && allRecords.length >= recipe.maxRecords) break;
+
+          let bodyJson = null;
+          try {
+            bodyJson = fired.res.text ? JSON.parse(fired.res.text) : null;
+          } catch {
+            bodyJson = null;
+          }
+          const nextCursor = getPath(bodyJson, step.paginate.cursorPath);
+          const more = step.paginate.morePath ? !!getPath(bodyJson, step.paginate.morePath) : true;
+          if (nextCursor === undefined || nextCursor === null || nextCursor === '' || !more) break;
+          cursorValue = nextCursor;
         }
-        let parsed;
-        try {
-          parsed = parseResponse(step.parse, fired.res.text);
-        } catch {
-          throw Object.assign(new Error(`step "${step.name}" response could not be parsed`), { code: 'STEP_PARSE' });
+
+        stepResults[step.name] = { records: allRecords };
+        candidateRecords = allRecords;
+        applyStepExtra(recipe, step, inputs, token, nowIso, stepResults);
+        stepDiag.push({
+          name: step.name,
+          status: 'ok',
+          ms: Date.now() - t0,
+          records: allRecords.length,
+          ...(step.paginate ? { pages } : {}),
+        });
+        if (step.requireRecords && allRecords.length === 0) {
+          return withSteps({ ok: false, reason: 'no-match', detail: `step:${step.name}` }, diagnostics, stepDiag);
         }
-        const records = parsed.records || [];
-        stepResults[step.name] = { records };
-        candidateRecords = records;
-        lastParse = step.parse;
-        stepDiag.push({ name: step.name, status: 'ok', ms: Date.now() - t0, records: records.length });
       } catch (e) {
         if (e && e.code === 'REQUEST_CAP') {
           stepDiag.push({ name: step.name, status: 'error', ms: Date.now() - t0, records: 0 });

@@ -1,0 +1,20 @@
+{
+  "_comment": "All fictional data. event.start/end.utc accept a literal ISO string or a relative 'NOW±<N>h' token, resolved once at server startup relative to the instant the process started (see resolveDate() in server.js). Attendees are generated at startup (see genAttendees() in server.js): 120 fictional attendees, mostly 'attending', a few 'not-approved'/'cancelled' to exercise status filtering, one deliberately placed on page 3 (attendees 101-120) for the pagination test — see needleAttendee below.",
+
+  "event": {
+    "id": "900001",
+    "name": { "text": "Tikspot Community Meetup" },
+    "start": { "timezone": "UTC", "local": "NOW-2h", "utc": "NOW-2h" },
+    "end": { "timezone": "UTC", "local": "NOW+4h", "utc": "NOW+4h" }
+  },
+
+  "needleAttendee": {
+    "index": 105,
+    "firstName": "Grace",
+    "lastName": "Kim",
+    "email": "grace.kim@example.com"
+  },
+
+  "attendeeCount": 120,
+  "pageSize": 50
+}
