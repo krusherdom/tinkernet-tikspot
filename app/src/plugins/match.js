@@ -18,6 +18,16 @@ export function normalize(value, mode) {
     case 'phone':
     case 'digits':
       return s.replace(/\D/g, '');
+    case 'roomNumber': {
+      // The LAST run of digits, leading zeros dropped — PMS area names carry
+      // a block/building prefix before the room number ("01 120", "Deluxe
+      // 002 - 10", "Villa 7"), so this compares "120", "10", "7" against what
+      // the guest typed. No digits, or all zeros, collapses to '' so it never
+      // accidentally matches a real room.
+      const runs = s.match(/\d+/g);
+      if (!runs) return '';
+      return runs[runs.length - 1].replace(/^0+/, '');
+    }
     case 'email':
       return s.trim().toLowerCase();
     case 'upper':

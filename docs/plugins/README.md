@@ -104,6 +104,7 @@ Only needed if your system requires a login call before the lookup request(s).
 | `placement.in` | `header`\|`query`\|`body` | `header` | where the token goes on later requests |
 | `placement.name` | string | `Authorization` | header/query-param name |
 | `placement.prefix` | string | `Bearer ` | prepended to the token; `''` is honoured as *no prefix* — some APIs (RMS Cloud included) want the bare token |
+| `discover` | `{url, param, path?}` | — | 0.16.1 — **base-URL discovery**: one unauthenticated `GET url` (template-able with `{{secret.*}}`/`{{param.*}}`) made *before* the token request; the response body (plain text, or `path` into a JSON body) must be an http(s) origin and becomes the value of the named operator `param` for the auth request and every step URL of that run. Cached for `tokenTtlSecs`. Used by the RMS Cloud recipes (`GET /clientUrl/{clientId}` → `baseUrl`), which RMS certification requires instead of a hard-coded host. A non-2xx, non-URL or unparsable response fails the lookup as `upstream` |
 
 **Re-auth on 401/403 (v2):** if any lookup request that used a cached token comes back
 401 or 403, the engine deletes that cache entry, fetches a fresh token, and retries that
@@ -447,6 +448,7 @@ Each rule: `{ input, field | anyOf: [...], normalize }`.
   | `name` | case/diacritic/punctuation-insensitive; hyphens, dashes and slashes count as optional word breaks (`José O'Brien` ≈ `jose obrien`, `Smith-Jones` ≈ `smith jones` ≈ `smithjones`) |
   | `phone` | digits only, compares the **last 9 digits** if both sides have ≥ 9 (tolerates country-code/leading-zero differences) |
   | `digits` | digits only, exact match |
+  | `roomNumber` | 0.16.1 — the **last run of digits**, leading zeros dropped, exact match: a PMS area name like `01 120`, `Deluxe 002 - 10` or `Villa 7` equals a typed `120` / `10` / `7`, but `12` does not match `120`. Use it for room/site rules against systems that put a block/building prefix before the room number or zero-pad it (RMS Cloud does) |
   | `email` | trimmed + lower-cased |
   | `upper` | trimmed + upper-cased |
 

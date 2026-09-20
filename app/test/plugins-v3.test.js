@@ -583,3 +583,105 @@ test('wildcard [*] paths work inside placeholders (raw array + joined string)', 
   assert.deepEqual(renderJsonTemplate({ ids: '{{raw:steps.room.records[*].nope}}' }, vars, { omitEmpty: true }), {});
   assert.equal(renderTemplate('{{steps.room.records[*].id}}', vars), 'a,b');
 });
+
+// ---------------------------------------------------------------------------
+// H. auth.discover — base-URL discovery before login (0.16.1)
+// ---------------------------------------------------------------------------
+
+function discoverRecipe(overrides = {}) {
+  return baseRecipe({
+    params: { baseUrl: { label: 'Seed URL', type: 'text', default: 'http://seed.example.com' } },
+    paramValues: { baseUrl: 'http://seed.example.com' },
+    secretKeys: ['clientId'],
+    secrets: { clientId: '11281' },
+    auth: {
+      method: 'POST',
+      url: '{{param.baseUrl}}/authToken',
+      bodyJson: { clientId: '{{int:secret.clientId}}' },
+      tokenPath: 'token',
+      tokenTtlSecs: 86400,
+      placement: { in: 'header', name: 'authtoken', prefix: '' },
+      discover: { url: '{{param.baseUrl}}/clientUrl/{{secret.clientId}}', param: 'baseUrl' },
+    },
+    request: { method: 'GET', url: '{{param.baseUrl}}/guests?room={{input.room}}', contentType: 'json' },
+    ...overrides,
+  });
+}
+
+function discoverHttp(log, { body = 'https://real.example.com/', status = 200 } = {}) {
+  return async (req) => {
+    log.push(req.url);
+    if (req.url.includes('/clientUrl/')) return { status, headers: {}, text: body, ms: 1 };
+    if (req.url.includes('/authToken')) return { status: 200, headers: {}, text: JSON.stringify({ token: 'tok' }), ms: 1 };
+    return { status: 200, headers: {}, text: JSON.stringify({ guests: [{ room: '101', lastName: 'Smith' }] }), ms: 1 };
+  };
+}
+
+test('validateRecipe: auth.discover requires a declared param and an http(s) url', () => {
+  const ok = validateRecipe(discoverRecipe());
+  assert.equal(ok.ok, true, JSON.stringify(ok.fields));
+  assert.deepEqual(ok.value.auth.discover, { url: '{{param.baseUrl}}/clientUrl/{{secret.clientId}}', param: 'baseUrl' });
+
+  const badParam = validateRecipe(discoverRecipe({ auth: { ...discoverRecipe().auth, discover: { url: 'http://x/clientUrl/1', param: 'nope' } } }));
+  assert.equal(badParam.ok, false);
+  assert.ok(badParam.fields['auth.discover.param']);
+
+  const badUrl = validateRecipe(discoverRecipe({ auth: { ...discoverRecipe().auth, discover: { url: 'ftp://x', param: 'baseUrl' } } }));
+  assert.equal(badUrl.ok, false);
+  assert.ok(badUrl.fields['auth.discover.url']);
+});
+
+test('engine: auth.discover (plain-text body) overrides the param for the auth URL and every step URL, and is cached', async () => {
+  const recipe = validated(discoverRecipe());
+  const log = [];
+  const http = discoverHttp(log);
+  const tokenCache = makeTokenCache();
+  const now = Date.parse('2026-01-01T00:00:00.000Z');
+  const inputs = [{ name: 'room', value: '101', required: true }];
+
+  const first = await runLookup({ recipe, inputs, now, http, tokenCache, diagnostics: true });
+  assert.equal(first.ok, true, JSON.stringify(first));
+  assert.deepEqual(log, [
+    'http://seed.example.com/clientUrl/11281',
+    'https://real.example.com/authToken',
+    'https://real.example.com/guests?room=101',
+  ]);
+  assert.equal(first.steps[0].name, 'discover');
+  assert.equal(first.steps[0].cached, false);
+  // The caller's recipe object is not mutated.
+  assert.equal(recipe.paramValues.baseUrl, 'http://seed.example.com');
+
+  log.length = 0;
+  const second = await runLookup({ recipe, inputs, now: now + 60_000, http, tokenCache, diagnostics: true });
+  assert.equal(second.ok, true);
+  assert.deepEqual(log, ['https://real.example.com/guests?room=101'], 'discover and token both cached');
+  assert.equal(second.steps[0].cached, true);
+
+  // Past tokenTtlSecs both are re-fetched.
+  log.length = 0;
+  await runLookup({ recipe, inputs, now: now + 86_400_000 + 1, http, tokenCache });
+  assert.equal(log[0], 'http://seed.example.com/clientUrl/11281');
+});
+
+test('engine: auth.discover with a JSON path, and a JSON-encoded string body', async () => {
+  const jsonRecipe = validated(discoverRecipe({ auth: { ...discoverRecipe().auth, discover: { url: '{{param.baseUrl}}/clientUrl/{{secret.clientId}}', param: 'baseUrl', path: 'data.url' } } }));
+  const log = [];
+  const http = discoverHttp(log, { body: JSON.stringify({ data: { url: 'https://json.example.com' } }) });
+  const r = await runLookup({ recipe: jsonRecipe, inputs: { room: '101' }, http, tokenCache: makeTokenCache() });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(log[1], 'https://json.example.com/authToken');
+
+  const log2 = [];
+  const r2 = await runLookup({ recipe: validated(discoverRecipe()), inputs: { room: '101' }, http: discoverHttp(log2, { body: '"https://quoted.example.com"' }), tokenCache: makeTokenCache() });
+  assert.equal(r2.ok, true, JSON.stringify(r2));
+  assert.equal(log2[1], 'https://quoted.example.com/authToken');
+});
+
+test('engine: auth.discover failure (non-2xx or non-URL body) -> upstream, no token request', async () => {
+  for (const opts of [{ status: 404 }, { body: 'not a url' }, { body: '' }]) {
+    const log = [];
+    const r = await runLookup({ recipe: validated(discoverRecipe()), inputs: { room: '101' }, http: discoverHttp(log, opts), tokenCache: makeTokenCache() });
+    assert.deepEqual(r, { ok: false, reason: 'upstream' }, JSON.stringify(opts));
+    assert.equal(log.length, 1, 'only the discover call should have been made');
+  }
+});

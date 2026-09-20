@@ -991,7 +991,7 @@
   // guided editor over the recipe schema in app/src/plugins/recipe.js, plus a
   // live Test panel over POST /api/plugins/:id/test.
   var CANON_FIELDS = ['firstName', 'lastName', 'fullName', 'room', 'mobile', 'email', 'checkIn', 'checkOut', 'bookingRef'];
-  var NORMALIZERS = ['trim', 'name', 'phone', 'email', 'digits', 'upper'];
+  var NORMALIZERS = ['trim', 'name', 'phone', 'email', 'digits', 'roomNumber', 'upper'];
   var GUEST_API_DOCS = 'https://github.com/krusherdom/tinkernet-tikspot/blob/main/examples/guest-api/README.md';
   var CATALOG_DEFAULT_URL = 'https://raw.githubusercontent.com/krusherdom/tinkernet-tikspot/main/plugins/index.json';
   var routeSub = '';          // the part after "tab/" in the hash
@@ -1090,6 +1090,8 @@
         placement: { in: pl.in || 'header', name: pl.name || 'Authorization', prefix: pl.prefix == null ? 'Bearer ' : pl.prefix },
         basicOn: !!a.basic,
         basic: { user: (a.basic && a.basic.user) || '{{secret.username}}', pass: (a.basic && a.basic.pass) || '{{secret.password}}' },
+        discoverOn: !!(a.discover && a.discover.url),
+        discover: { url: (a.discover && a.discover.url) || '', param: (a.discover && a.discover.param) || '', path: (a.discover && a.discover.path) || '' },
       },
       authHeaderRows: pgRows(a.headers),
       request: {
@@ -1166,6 +1168,10 @@
         });
         if (d.auth.tokenTtlSecs !== '') r.auth.tokenTtlSecs = pgNum(d.auth.tokenTtlSecs, 3600); else delete r.auth.tokenTtlSecs;
         if (d.auth.basicOn) r.auth.basic = { user: d.auth.basic.user, pass: d.auth.basic.pass }; else delete r.auth.basic;
+        if (d.auth.discoverOn) {
+          r.auth.discover = { url: d.auth.discover.url, param: d.auth.discover.param };
+          if (String(d.auth.discover.path || '').trim()) r.auth.discover.path = d.auth.discover.path.trim();
+        } else delete r.auth.discover;
       }
       // authOn off: leave r.auth exactly as loaded (or absent for a new plugin) —
       // an update that omits `auth` keeps the stored step; only Raw JSON's
@@ -1493,6 +1499,14 @@
       (a.basicOn ? '<div class="row pg-r">' +
         fieldH('pg-au-bu', 'Basic auth user', pgTxt('auth.basic.user', a.basic.user, ' id="pg-au-bu" placeholder="{{secret.username}}"'), '') +
         fieldH('pg-au-bp', 'Basic auth pass', pgTxt('auth.basic.pass', a.basic.pass, ' id="pg-au-bp" placeholder="{{secret.password}}"'), '') +
+        '</div>' : '') +
+      '<div class="pg-toggles" style="margin-top:6px">' +
+      pgChk('auth.discoverOn', a.discoverOn, 'Discover the API base URL before logging in', ' data-restructure') +
+      '</div>' +
+      (a.discoverOn ? '<div class="row pg-r">' +
+        fieldH('pg-au-du', 'Discover URL', pgTxt('auth.discover.url', a.discover.url, ' id="pg-au-du" placeholder="{{param.baseUrl}}/clientUrl/{{secret.clientId}}" class="wide"'), 'An unauthenticated GET whose reply is the real API origin (RMS Cloud: <code>/clientUrl/{clientId}</code>).') +
+        fieldH('pg-au-dp', 'Sets parameter', pgTxt('auth.discover.param', a.discover.param, ' id="pg-au-dp" placeholder="baseUrl"'), 'Declared parameter that receives the discovered origin.') +
+        fieldH('pg-au-dj', 'JSON path (optional)', pgTxt('auth.discover.path', a.discover.path, ' id="pg-au-dj" placeholder="leave blank for a plain-text reply"'), '') +
         '</div>' : '') +
       pgSectionSecrets() + '</div>';
   }

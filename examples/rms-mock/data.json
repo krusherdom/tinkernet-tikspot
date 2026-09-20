@@ -1,13 +1,32 @@
 {
-  "_comment": "arrivalDate/departureDate accept a literal 'YYYY-MM-DD HH:MM:SS' string or a relative 'NOW±<N>h' / 'NOW±<N>d' token, resolved once at server startup relative to the instant the process started (see resolveDate() in server.js). All fictional data. Note: 'status' reflects what the PMS record actually says — a reservation can be 'arrived'/'confirmed' with dates well in the past if front-desk staff haven't marked it departed yet (this is deliberate: it's what the rms-cloud-*.json recipes' stay-window check needs to catch).",
-
+  "_comment": "arrivalDate/departureDate accept a literal 'YYYY-MM-DD HH:MM:SS' string or a relative 'NOW±<N>h' / 'NOW±<N>d' token, resolved once at server startup relative to the instant the process started (see resolveDate() in server.js). All fictional data. Note: 'status' reflects what the PMS record actually says — a reservation can be 'Arrived'/'Confirmed' with dates well in the past if front-desk staff haven't marked it departed yet (this is deliberate: it's what the rms-cloud-*.json recipes' stay-window check needs to catch). Statuses are capitalised exactly as the real RMS API returns them ('Arrived', 'Confirmed', ...); the search filter compares case-insensitively. Reservation 5008 mirrors a real RMS group-master row: guestId 0 and blank names in an occupied room.",
   "areas": [
-    { "id": 10, "name": "101", "propertyId": 1 },
-    { "id": 11, "name": "Room 102", "propertyId": 1 },
-    { "id": 12, "name": "Villa 7", "propertyId": 1 },
-    { "id": 13, "name": "203", "propertyId": 1 }
+    {
+      "id": 10,
+      "name": "101",
+      "propertyId": 1
+    },
+    {
+      "id": 11,
+      "name": "Room 102",
+      "propertyId": 1
+    },
+    {
+      "id": 12,
+      "name": "Villa 7",
+      "propertyId": 1
+    },
+    {
+      "id": 13,
+      "name": "203",
+      "propertyId": 1
+    },
+    {
+      "id": 14,
+      "name": "01 120",
+      "propertyId": 1
+    }
   ],
-
   "guests": [
     {
       "id": 9001,
@@ -73,9 +92,16 @@
       "email": "isabelle.novak@example.com",
       "mobile": "+61 412 000 007",
       "phone": ""
+    },
+    {
+      "id": 9008,
+      "guestGiven": "Hana",
+      "guestSurname": "Okafor",
+      "email": "hana.okafor@example.com",
+      "mobile": "+61 412 000 008",
+      "phone": ""
     }
   ],
-
   "reservations": [
     {
       "id": 5001,
@@ -85,7 +111,7 @@
       "arrivalDate": "NOW-1d",
       "departureDate": "NOW+2d",
       "guestId": 9001,
-      "status": "arrived",
+      "status": "Arrived",
       "propertyId": 1,
       "adults": 2,
       "children": 0
@@ -98,7 +124,7 @@
       "arrivalDate": "NOW+2h",
       "departureDate": "NOW+3d",
       "guestId": 9002,
-      "status": "confirmed",
+      "status": "Confirmed",
       "propertyId": 1,
       "adults": 1,
       "children": 0
@@ -111,7 +137,7 @@
       "arrivalDate": "NOW-6d",
       "departureDate": "NOW-3d",
       "guestId": 9003,
-      "status": "arrived",
+      "status": "Arrived",
       "propertyId": 1,
       "adults": 2,
       "children": 1
@@ -124,7 +150,7 @@
       "arrivalDate": "NOW+10d",
       "departureDate": "NOW+13d",
       "guestId": 9004,
-      "status": "confirmed",
+      "status": "Confirmed",
       "propertyId": 1,
       "adults": 2,
       "children": 0
@@ -137,7 +163,7 @@
       "arrivalDate": "NOW+20d",
       "departureDate": "NOW+22d",
       "guestId": 9005,
-      "status": "cancelled",
+      "status": "Cancelled",
       "propertyId": 1,
       "adults": 2,
       "children": 0
@@ -150,7 +176,7 @@
       "arrivalDate": "NOW-2h",
       "departureDate": "NOW+4d",
       "guestId": 9006,
-      "status": "confirmed",
+      "status": "Confirmed",
       "propertyId": 1,
       "adults": 3,
       "children": 1
@@ -163,9 +189,35 @@
       "arrivalDate": "NOW-5d",
       "departureDate": "NOW-26h",
       "guestId": 9007,
-      "status": "departed",
+      "status": "Departed",
       "propertyId": 1,
       "adults": 1,
+      "children": 0
+    },
+    {
+      "id": 5008,
+      "areaId": 14,
+      "areaName": "01 120",
+      "categoryName": "Furnished Apartment",
+      "arrivalDate": "NOW-1d",
+      "departureDate": "NOW+3d",
+      "guestId": 0,
+      "status": "Arrived",
+      "propertyId": 1,
+      "adults": 0,
+      "children": 0
+    },
+    {
+      "id": 5009,
+      "areaId": 14,
+      "areaName": "01 120",
+      "categoryName": "Furnished Apartment",
+      "arrivalDate": "NOW-1d",
+      "departureDate": "NOW+3d",
+      "guestId": 9008,
+      "status": "Arrived",
+      "propertyId": 1,
+      "adults": 2,
       "children": 0
     }
   ]

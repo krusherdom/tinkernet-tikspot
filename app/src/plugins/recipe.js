@@ -52,7 +52,7 @@ export const CANONICAL_FIELDS = [
 ];
 
 // Value normalizers usable in match.rules[].normalize. See match.js.
-export const NORMALIZERS = ['trim', 'name', 'phone', 'email', 'digits', 'upper'];
+export const NORMALIZERS = ['trim', 'name', 'phone', 'email', 'digits', 'roomNumber', 'upper'];
 
 const DEFAULT_MESSAGES = {
   noMatch: 'We could not find a booking with those details.',
@@ -333,7 +333,35 @@ function validateParseBlock(p, path, fail) {
   return result;
 }
 
-function validateAuthBlock(a, path, fail) {
+// auth.discover (0.16.1): an optional, unauthenticated GET made once before
+// the token request whose response body (plain text, or `path` into a JSON
+// body) becomes the value of the named operator param for the rest of the
+// run — how RMS Cloud's `GET /clientUrl/{clientId}` hands back the property's
+// real API origin so `baseUrl` needn't be hard-coded. See engine.js's
+// resolveDiscoveredParams.
+function validateDiscoverBlock(raw, path, paramNames, fail) {
+  if (raw === undefined || raw === null) return undefined;
+  if (!isPlainObject(raw)) {
+    fail(`${path}.discover`, `${path}.discover must be an object with "url" and "param"`);
+    return undefined;
+  }
+  const url = typeof raw.url === 'string' ? raw.url.trim() : '';
+  if (!isHttpUrl(url)) fail(`${path}.discover.url`, `${path}.discover.url must be an http(s) URL`);
+  const param = typeof raw.param === 'string' ? raw.param.trim() : '';
+  if (!param || !paramNames.includes(param)) {
+    fail(`${path}.discover.param`, `${path}.discover.param must name a declared param`);
+  }
+  const result = { url, param };
+  if (raw.path !== undefined && raw.path !== null && raw.path !== '') {
+    if (typeof raw.path !== 'string') fail(`${path}.discover.path`, `${path}.discover.path must be a string`);
+    else result.path = raw.path.trim();
+  }
+  const found = findUnknownHelpers(url);
+  if (found.length) fail(`${path}.discover.url`, `unknown template helper "${found[0]}"`);
+  return result;
+}
+
+function validateAuthBlock(a, path, fail, paramNames = []) {
   if (!isHttpUrl(a.url)) fail(`${path}.url`, `${path}.url must be an http(s) URL`);
   const method = AUTH_METHODS.includes(a.method) ? a.method : 'POST';
   const contentType = AUTH_CONTENT_TYPES.includes(a.contentType) ? a.contentType : 'json';
@@ -359,6 +387,8 @@ function validateAuthBlock(a, path, fail) {
     const basic = validateBasicBlock(a.basic, path, fail);
     if (basic) result.basic = basic;
   }
+  const discover = validateDiscoverBlock(a.discover, path, paramNames, fail);
+  if (discover) result.discover = discover;
   checkTemplateHelpers(result, path, fail);
   return result;
 }
@@ -608,7 +638,7 @@ export function validateRecipe(obj) {
     } else if (!isPlainObject(obj.auth)) {
       fail('auth', 'auth must be an object');
     } else {
-      value.auth = validateAuthBlock(obj.auth, 'auth', fail);
+      value.auth = validateAuthBlock(obj.auth, 'auth', fail, Object.keys(params));
     }
   }
 

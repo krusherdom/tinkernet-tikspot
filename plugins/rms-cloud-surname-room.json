@@ -22,21 +22,21 @@
     },
     "params": {
       "baseUrl": {
-        "label": "RMS API base URL",
+        "label": "RMS API seed URL (region)",
         "type": "text",
         "default": "https://restapi12.rmscloud.com",
-        "help": "Regional RMS Cloud API origin: https://restapi12.rmscloud.com (Asia-Pacific/Australia), https://restapi13.rmscloud.com (North America), https://restapi14.rmscloud.com (Europe), https://restapi9.rmscloud.cn (China); beta servers are restapi12beta/13beta/14beta. For the bundled mock use http://<workstation LAN IP>:8091."
+        "help": "Any RMS Cloud regional API origin — https://restapi12.rmscloud.com (Asia-Pacific/Australia), restapi13 (North America), restapi14 (Europe), restapi9.rmscloud.cn (China). Only used to call GET /clientUrl/{clientId}, which returns the property's real API origin (RMS certification requires this instead of a hard-coded host). For the bundled mock use http://<workstation LAN IP>:8091."
       },
       "propertyId": {
         "label": "Property ID (optional)",
-        "help": "Limit the search to one RMS property. Leave blank to search every property this agent can access.",
+        "help": "Limit the search to one RMS property. This is the property's internal id from GET /properties (e.g. 1), NOT the client number (e.g. 54321). Leave blank to search every property this agent can access.",
         "type": "number"
       },
       "moduleType": {
         "label": "Module type",
-        "help": "The module type your RMS API access was granted for. RMS tells you this when they issue your agent credentials — commonly \"distribution\".",
+        "help": "The module type RMS activated for your partner agent — RMS tells you this with your agent credentials (Tikspot's partner agent: \"GuestServices\").",
         "type": "text",
-        "default": "distribution"
+        "default": "GuestServices"
       },
       "useTrainingDatabase": {
         "label": "Use RMS training database",
@@ -63,16 +63,20 @@
       },
       "tokenPath": "token",
       "tokenExpiryPath": "expiryDate",
-      "tokenTtlSecs": 3600,
+      "tokenTtlSecs": 86400,
       "placement": {
         "in": "header",
         "name": "authtoken",
         "prefix": ""
+      },
+      "discover": {
+        "url": "{{param.baseUrl}}/clientUrl/{{secret.clientId}}",
+        "param": "baseUrl"
       }
     },
     "request": {
       "method": "POST",
-      "url": "{{param.baseUrl}}/reservations/search?modelType=basic&limit=50",
+      "url": "{{param.baseUrl}}/reservations/search?modelType=full&limit=50",
       "headers": {},
       "contentType": "json",
       "accept": "json",
@@ -82,6 +86,8 @@
           "arrived",
           "confirmed"
         ],
+        "arriveTo": "{{date:+1d:sql}}",
+        "departFrom": "{{date:-1d:sql}}",
         "propertyIds": [
           "{{int:param.propertyId}}"
         ]
@@ -108,7 +114,7 @@
         {
           "input": "room",
           "field": "room",
-          "normalize": "digits"
+          "normalize": "roomNumber"
         },
         {
           "input": "name",

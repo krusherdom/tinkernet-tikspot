@@ -30,3 +30,6 @@ changelog.md
 changelog_detailed.md
 failed_commands.md
 launch.md
+
+# RMS partner pack (credentials, certification docs) — commercially sensitive, never commit
+examples/rsi-docs/

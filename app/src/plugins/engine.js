@@ -283,6 +283,78 @@ async function fetchToken(recipe, http, tokenCache, nowMs, inputs, forceRefresh)
   return { token: String(token), fromCache: false };
 }
 
+// auth.discover: resolves a param value from an unauthenticated GET before
+// login (RMS Cloud's `GET /clientUrl/{clientId}` -> the property's API
+// origin). Returns the recipe unchanged when there's nothing to discover,
+// otherwise a shallow copy whose `paramValues[discover.param]` is the
+// discovered value — so the auth request AND every later step URL see it.
+// The value is cached in `tokenCache` under `<cacheKey>:discover` for the
+// auth block's tokenTtlSecs (RMS: 24 h), i.e. re-checked about as often as
+// the token itself is refreshed. Any failure throws an AUTH-coded error
+// (reported as `upstream`, like a failed login).
+async function resolveDiscoveredParams(recipe, http, tokenCache, nowMs, inputs) {
+  const discover = recipe.auth && recipe.auth.discover;
+  if (!discover || !discover.url || !discover.param) return { recipe, cached: false, skipped: true };
+
+  const vars = templateVars(recipe, inputs, '', new Date(nowMs).toISOString());
+  const url = renderTemplate(discover.url, vars, { escape: 'url' });
+  // Keyed by the rendered discover URL too, so an operator changing the
+  // client ID or seed URL (both usually part of that URL) never reuses a
+  // value discovered for the old configuration.
+  const cacheKey = `${tokenCacheKey(recipe)}:discover:${url}`;
+  const applyValue = (value) => ({ ...recipe, paramValues: { ...(recipe.paramValues || {}), [discover.param]: value } });
+
+  if (tokenCache && typeof tokenCache.get === 'function') {
+    const cached = tokenCache.get(cacheKey);
+    if (cached && cached.expiresAtMs > nowMs && typeof cached.value === 'string') {
+      return { recipe: applyValue(cached.value), cached: true, skipped: false };
+    }
+  }
+  const res = await http({
+    url,
+    method: 'GET',
+    headers: { Accept: discover.path ? 'application/json' : 'text/plain, application/json;q=0.9, */*;q=0.8' },
+    timeoutMs: recipe.timeoutMs || 8000,
+    insecureTls: !!recipe.allowInsecureTls,
+  });
+  if (res.status < 200 || res.status >= 300) {
+    throw Object.assign(new Error(`discover failed with status ${res.status}`), { code: 'AUTH' });
+  }
+
+  let value;
+  const text = typeof res.text === 'string' ? res.text.trim() : '';
+  if (discover.path) {
+    let json;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      throw Object.assign(new Error('discover response was not valid JSON'), { code: 'AUTH' });
+    }
+    value = getPath(json, discover.path);
+  } else {
+    // Plain text is the common case (RMS returns the bare origin), but be
+    // lenient with a JSON-encoded string body ("https://...").
+    value = text;
+    if (/^".*"$/.test(text)) {
+      try {
+        value = JSON.parse(text);
+      } catch {
+        value = text;
+      }
+    }
+  }
+  value = value == null ? '' : String(value).trim().replace(/\/+$/, '');
+  if (!/^https?:\/\/\S+$/i.test(value)) {
+    throw Object.assign(new Error(`discover did not return an http(s) URL for "${discover.param}"`), { code: 'AUTH' });
+  }
+
+  if (tokenCache && typeof tokenCache.set === 'function') {
+    const ttlMs = (recipe.auth.tokenTtlSecs || 3600) * 1000;
+    tokenCache.set(cacheKey, { value, expiresAtMs: nowMs + ttlMs });
+  }
+  return { recipe: applyValue(value), cached: false, skipped: false };
+}
+
 function stepVars(recipe, inputs, token, nowIso, stepResults, record) {
   const vars = templateVars(recipe, inputs, token, nowIso);
   vars.steps = stepResults;
@@ -434,13 +506,20 @@ async function runHttpLookup({ recipe, inputs = [], now, http = defaultHttpReque
 
   let token = '';
   let tokenFromCache = false;
+  const stepDiag = [];
   if (recipe.auth) {
     try {
+      const t0 = Date.now();
+      const discovered = await resolveDiscoveredParams(recipe, http, tokenCache, nowMs, inputs);
+      recipe = discovered.recipe; // patched paramValues apply to auth + every step below
+      if (!discovered.skipped) {
+        stepDiag.push({ name: 'discover', status: 'ok', ms: Date.now() - t0, records: 0, cached: discovered.cached });
+      }
       const res = await fetchToken(recipe, http, tokenCache, nowMs, inputs, false);
       token = res.token;
       tokenFromCache = res.fromCache;
     } catch (e) {
-      return { ok: false, reason: reasonForError(e) };
+      return withSteps({ ok: false, reason: reasonForError(e) }, diagnostics, stepDiag);
     }
   }
 
@@ -464,7 +543,6 @@ async function runHttpLookup({ recipe, inputs = [], now, http = defaultHttpReque
   const maxFanOut = Number.isFinite(recipe.maxFanOut) && recipe.maxFanOut > 0 ? recipe.maxFanOut : 10;
   const requestState = { n: 0, cap: REQUEST_CAP };
   const stepResults = {};
-  const stepDiag = [];
   let candidateRecords = [];
   let lastParse = recipe.parse;
 

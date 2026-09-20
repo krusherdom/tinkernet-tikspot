@@ -195,6 +195,16 @@ test('normalize: trim/name/phone/digits/email/upper', () => {
   assert.equal(normalize("José  O'Brien-Smith", 'name'), 'jose obrien smith');
   assert.equal(normalize('+44 (0) 7700-900123', 'phone'), '4407700900123');
   assert.equal(normalize('+44 (0) 7700-900123', 'digits'), '4407700900123');
+  // roomNumber: last run of digits, leading zeros dropped (RMS area names like "01 120")
+  assert.equal(normalize('01 120', 'roomNumber'), '120');
+  assert.equal(normalize('Deluxe 002 - 10', 'roomNumber'), '10');
+  assert.equal(normalize('Villa 7', 'roomNumber'), '7');
+  assert.equal(normalize('Room 102', 'roomNumber'), '102');
+  assert.equal(normalize('226', 'roomNumber'), '226');
+  assert.equal(normalize(' 0120 ', 'roomNumber'), '120');
+  assert.equal(normalize('000', 'roomNumber'), '');
+  assert.equal(normalize('Cabin', 'roomNumber'), '');
+  assert.notEqual(normalize('12', 'roomNumber'), normalize('120', 'roomNumber'));
   assert.equal(normalize('  Foo@BAR.com ', 'email'), 'foo@bar.com');
   assert.equal(normalize(' abc ', 'upper'), 'ABC');
   assert.equal(normalize(null, 'trim'), '');

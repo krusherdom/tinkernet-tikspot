@@ -100,10 +100,15 @@ const tokens = new Map(); // token -> expiresAtMs
 // /healthz so tests can assert "the token was cached and reused" without
 // scraping stdout logs.
 let authTokenCalls = 0;
+// Likewise for GET /clientUrl/{clientId} (base-URL discovery).
+let clientUrlCalls = 0;
+
+// Real RMS tokens live 24 hours.
+const TOKEN_TTL_MS = 24 * 3600 * 1000;
 
 function issueToken() {
   const token = 'rms_mock_' + crypto.randomBytes(16).toString('hex');
-  tokens.set(token, Date.now() + 3600 * 1000);
+  tokens.set(token, Date.now() + TOKEN_TTL_MS);
   return token;
 }
 
@@ -188,25 +193,23 @@ function matchesReservationFilters(r, f) {
   return true;
 }
 
-const BASIC_FIELDS = [
-  'id',
-  'areaId',
-  'areaName',
-  'categoryName',
-  'arrivalDate',
-  'departureDate',
-  'guestGiven',
-  'guestSurname',
-  'guestId',
-  'status',
-  'propertyId',
-];
+// Verified against the RMS sandbox (2026-09-16): `modelType=basic` carries
+// ids and dates but NOT `areaName`, `guestGiven`, `guestSurname` or
+// `propertyId` — those only appear on `modelType=full`. The recipes must
+// therefore request `full`; keeping the mock faithful here is what makes the
+// integration test catch a recipe that regresses to `basic`.
+const BASIC_FIELDS = ['id', 'areaId', 'categoryId', 'arrivalDate', 'departureDate', 'guestId', 'status', 'adults', 'children'];
 
 function reservationView(r, modelType) {
   if (modelType === 'full') return r;
   const basic = {};
-  for (const k of BASIC_FIELDS) basic[k] = r[k];
+  for (const k of BASIC_FIELDS) if (r[k] !== undefined) basic[k] = r[k];
   return basic;
+}
+
+// The real API answers 400 to a search with no filters at all.
+function hasAnyFilter(f) {
+  return Object.values(f || {}).some((v) => (Array.isArray(v) ? v.length > 0 : v !== undefined && v !== null && v !== ''));
 }
 
 function guestPublicView(g) {
@@ -223,7 +226,26 @@ const server = http.createServer((req, res) => {
     .then(async () => {
       if (req.method === 'GET' && url.pathname === '/healthz') {
         status = 200;
-        sendJson(res, status, { ok: true, reservations: reservations.length, guests: guests.length, authTokenCalls });
+        sendJson(res, status, { ok: true, reservations: reservations.length, guests: guests.length, authTokenCalls, clientUrlCalls });
+        return;
+      }
+
+      // GET /clientUrl/{clientId} — unauthenticated base-URL discovery. The
+      // real API returns the property's regional API origin as a plain-text
+      // body (verified 2026-09-16); here that's simply this server's origin.
+      const clientUrlMatch = /^\/clientUrl\/(\d+)$/.exec(url.pathname);
+      if (req.method === 'GET' && clientUrlMatch) {
+        clientUrlCalls += 1;
+        if (Number(clientUrlMatch[1]) !== Number(config.clientId)) {
+          status = 404;
+          sendJson(res, status, { message: 'client not found' });
+          return;
+        }
+        const origin = `http://${req.headers.host || `127.0.0.1:${server.address().port}`}`;
+        const buf = Buffer.from(origin, 'utf8');
+        status = 200;
+        res.writeHead(status, { 'Content-Type': 'text/plain; charset=utf-8', 'Content-Length': buf.length });
+        res.end(buf);
         return;
       }
 
@@ -245,7 +267,7 @@ const server = http.createServer((req, res) => {
         status = 201;
         sendJson(res, status, {
           token,
-          expiryDate: toSqlDate(Date.now() + 3600 * 1000),
+          expiryDate: toSqlDate(Date.now() + TOKEN_TTL_MS),
           rmsClientId: config.rmsClientId,
           allowedProperties: config.allowedProperties,
         });
@@ -262,6 +284,11 @@ const server = http.createServer((req, res) => {
       if (req.method === 'POST' && url.pathname === '/reservations/search') {
         const raw = await readBody(req);
         const filters = parseJsonBody(raw);
+        if (!hasAnyFilter(filters)) {
+          status = 400;
+          sendJson(res, status, { message: 'Invalid request. At least one request value is required.' });
+          return;
+        }
         const modelType = url.searchParams.get('modelType') || 'basic';
         const limit = Number(url.searchParams.get('limit')) || 50;
         const results = reservations.filter((r) => matchesReservationFilters(r, filters)).slice(0, limit);
@@ -325,9 +352,35 @@ const server = http.createServer((req, res) => {
         return;
       }
 
+      // GET /properties — the properties this agent can see. `id` is the
+      // internal property id that `propertyIds[]` / `?propertyId=` expect;
+      // `clientId` is the per-property client number (NOT interchangeable).
+      if (req.method === 'GET' && url.pathname === '/properties') {
+        status = 200;
+        sendJson(
+          res,
+          status,
+          (config.allowedProperties || []).map((p, i) => ({
+            id: i + 1,
+            clientId: p.clientId,
+            name: p.clientName,
+            code: `TP${i + 1}`,
+            timeZone: 'AUS Eastern Standard Time',
+            inactive: false,
+          })),
+        );
+        return;
+      }
+
       if (req.method === 'GET' && url.pathname === '/areas') {
         const propertyId = url.searchParams.get('propertyId');
-        const results = propertyId == null || propertyId === '' ? areas : areas.filter((a) => Number(a.propertyId) === Number(propertyId));
+        if (propertyId == null || propertyId === '') {
+          // The real API requires propertyId here (verified 2026-09-16).
+          status = 400;
+          sendJson(res, status, { message: 'propertyId is required.' });
+          return;
+        }
+        const results = areas.filter((a) => Number(a.propertyId) === Number(propertyId));
         status = 200;
         sendJson(res, status, results);
         return;

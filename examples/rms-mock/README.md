@@ -14,7 +14,7 @@ treat any behaviour beyond that as unverified against the real API.
 
 ## What it is
 
-`server.js` serves 7 made-up reservations and 7 made-up guests out of `data.json`. Their
+`server.js` serves 9 made-up reservations and 8 made-up guests out of `data.json`. Their
 arrival/departure dates are relative to *when the server starts*, so a run always has a
 believable mix: one guest currently checked in (room `101`, Olivia Bennett), one arriving
 later today (`Room 102`, Marcus Delgado), one whose stay has already ended even though the
@@ -22,7 +22,10 @@ record still says `arrived` — real front desks don't always update status prom
 7`, Priya Nair), one arriving in 10 days (`203`, Tomasz Wysocki), one cancelled booking
 (`101`, Freya Holm), one genuinely marked `departed` (`203`, Isabelle Novak), and a second
 currently-checked-in guest sharing a room name with Priya's ended stay (`Villa 7`, Grace
-Sato — useful for exercising the "room + any detail" recipe's disambiguation). All names,
+Sato — useful for exercising the "room + any detail" recipe's disambiguation), and a
+zero-padded room `01 120` holding both a checked-in guest (Hana Okafor) and a real-RMS-style
+group-master row with `guestId: 0` and no name (so the any-detail recipe's guest step must
+tolerate a `404`). All names,
 emails and phone numbers are fictional.
 
 It exposes:
@@ -44,7 +47,13 @@ It exposes:
 - `GET /guests/{id}` — one guest, or `404`.
 - `GET /guests/{id}/contacts` — that guest's *additional* contacts (most guests have
   none; one, id `9006`, has one).
-- `GET /areas?propertyId=` — the four sample areas, optionally filtered by property.
+- `GET /clientUrl/{clientId}` — **unauthenticated** base-URL discovery: a plain-text body
+  holding this server's own origin (the real API returns the property's regional API
+  origin). `404` for an unknown client. Counted on `/healthz` as `clientUrlCalls`.
+- `GET /properties` — the properties from `config.json`'s `allowedProperties`, each with the
+  internal `id` (1, 2, …) that `propertyIds[]` / `?propertyId=` expect, plus its `clientId`.
+- `GET /areas?propertyId=` — the sample areas for that property; `400` without `propertyId`
+  (as on the real API).
 
 Default credentials (see `config.json`): agent ID `1000`, agent password
 `agent-secret`, client ID `11281`, client (Web Service) password `webservice-secret`.
@@ -78,14 +87,18 @@ server after editing them.
 1. Start the mock: `npm run rms-mock`.
 2. In Tikspot's admin, **Guest lookup → Browse catalog**, import **RMS Cloud — surname +
    room** (or **room + any guest detail**).
-3. Set the recipe's **RMS API base URL** parameter to `http://192.168.1.42:8091` (your
+3. Set the recipe's **RMS API seed URL** parameter to `http://192.168.1.42:8091` (your
    workstation's LAN IP and the mock's port — the router's container cannot reach
    `127.0.0.1` on your dev machine).
 4. Fill in the secrets from `config.json` above.
 5. Run **Test lookup**:
    - room `101`, surname `Bennett` → match (currently checked in).
-   - room `Villa 7`, surname `Nair` → outside-window (stay already ended).
-   - room `203`, surname `Wysocki` → outside-window (arrives in 10 days).
+   - room `120`, surname `Okafor` → match — the area is named `01 120`; the `roomNumber`
+     normalizer drops the zero-padding.
+   - room `Villa 7`, surname `Nair` → no-match (stay ended 3 days ago — the recipes ask RMS for
+     `departFrom` = yesterday and `arriveTo` = tomorrow, so old and far-future stays are
+     filtered out server-side and never reach the stay-window check).
+   - room `203`, surname `Wysocki` → no-match (arrives in 10 days, same reason).
    - room `Villa 7`, email `grace.sato@example.com` (any-detail recipe, leave surname
      blank) → match, even though another guest (`Nair`) also stayed in "Villa 7".
    - room `101` only, nothing else (any-detail recipe) → no-match — that recipe requires

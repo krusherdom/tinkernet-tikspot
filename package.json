@@ -1,6 +1,6 @@
 {
   "name": "tikspot",
-  "version": "0.16.0",
+  "version": "0.16.1",
   "private": true,
   "description": "MikroTik hotspot container: FreeRADIUS + live captive portal + admin portal",
   "scripts": {
