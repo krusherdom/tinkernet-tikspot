@@ -1,0 +1,21 @@
+# Example forbidden-strings list for scripts/hooks/pre-commit.
+#
+# Copy to local/forbidden-strings.txt (gitignored) and replace with YOUR private
+# strings. One fixed string per line, matched case-insensitively against the lines
+# a commit adds. Blank lines and lines starting with # are ignored.
+#
+# Good candidates: customer and site names, internal hostnames and IP prefixes,
+# PMS client/agent numbers, guest names used in testing, and a distinctive
+# FRAGMENT of each password or shared secret (a fragment is enough to catch a
+# leak, and keeps the full secret out of this file).
+
+# customer / site
+example-customer-name
+portal.customer.example
+
+# network
+10.99.254.
+192.0.2.129
+
+# credentials (fragments)
+s3cr3t-frag

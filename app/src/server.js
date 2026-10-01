@@ -32,6 +32,9 @@ import { sweepMidnightExpiry } from './radius/midnight.js';
 import { sweepRetention } from './admin/retention.js';
 import { sweepPluginGrants } from './plugins/grants.js';
 import { logEvent } from './admin/events.js';
+import { readBootstrapEnv } from './bootstrap/env.js';
+import { startRouterBootstrap } from './bootstrap/router.js';
+import { readBootstrapStatus } from './bootstrap/status.js';
 
 const here = (p) => fileURLToPath(new URL(p, import.meta.url));
 
@@ -100,6 +103,9 @@ app.get('/healthz', async (_req, reply) => {
     service: 'tikspot',
     version: VERSION,
     db: dbOk,
+    // Zero-touch bootstrap outcome (names/step statuses only — no values), so
+    // a headless deploy can be checked from the router with /tool/fetch.
+    bootstrap: dbOk ? readBootstrapStatus(db) : null,
     ts: new Date().toISOString(),
   };
 });
@@ -171,6 +177,13 @@ async function main() {
   } catch (err) {
     app.log.error(err);
     process.exit(1);
+  }
+  // Zero-touch: URL plugin import + router Auto-configure, in the background
+  // (it retries while the router boots). Never awaited, never throws.
+  try {
+    startRouterBootstrap(db, readBootstrapEnv(process.env), { log: app.log }).catch(() => {});
+  } catch (err) {
+    app.log.warn({ err: String(err) }, 'router bootstrap not started');
   }
 }
 

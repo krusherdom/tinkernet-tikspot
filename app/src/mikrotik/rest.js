@@ -299,6 +299,102 @@ export async function ensureWalledGarden(router, { address, host }) {
   return { added, detail: added.join(', ') };
 }
 
+// ---------------------------------------------------------------------------
+// Hotspot provisioning (zero-touch bootstrap). These create the hotspot itself
+// rather than assuming the operator already ran the RouterOS hotspot wizard.
+
+const DEFAULT_LOGIN_BY = 'mac-cookie,http-chap,http-pap,mac';
+
+// A configuration problem we detected ourselves (not a transport failure), so
+// autoConfigure must not mistake it for "router unreachable".
+function configError(message) {
+  const err = new Error(message);
+  err.local = true;
+  return err;
+}
+
+// The first enabled IPv4 on `iface`, as { ip, cidr } ("192.168.88.1",
+// "192.168.88.1/24"). The hotspot profile's hotspot-address and the DHCP
+// network match both key off it.
+export async function interfaceAddress(router, iface) {
+  const r = await readMenu(router, '/ip/address');
+  if (!r.ok) throw new Error(r.error);
+  const row = r.rows.find((a) => a.interface === iface && !yes(a.disabled) && a.address);
+  if (!row) throw configError(`no IPv4 address on interface ${iface} — give it one before provisioning the hotspot`);
+  const cidr = String(row.address);
+  return { ip: cidr.split('/')[0], cidr };
+}
+
+// Create/update the named hotspot profile, pointed at RADIUS. dns-name must NOT
+// equal the portal's server-name host: RouterOS adds a dynamic DNS entry
+// dns-name -> router, which would shadow Tikspot's DNS static for the portal.
+// NOTE: /ip/hotspot/profile has no comment field (see configureHotspotProfile),
+// so it is identified by name only.
+export async function ensureHotspotProfile(
+  router,
+  { name = 'tikspot', interface: iface, hotspotAddress, dnsName, serverHost, loginBy = DEFAULT_LOGIN_BY } = {},
+) {
+  if (dnsName && serverHost && dnsName.trim().toLowerCase() === String(serverHost).trim().toLowerCase()) {
+    throw configError(
+      `hotspot dns-name "${dnsName}" must differ from the server-name host — RouterOS maps dns-name to the router, which would hide the portal`,
+    );
+  }
+  const address = hotspotAddress || (iface ? (await interfaceAddress(router, iface)).ip : null);
+  const body = { 'use-radius': 'yes', 'radius-accounting': 'yes', 'login-by': loginBy };
+  if (address) body['hotspot-address'] = address;
+  if (dnsName) body['dns-name'] = dnsName;
+  const r = await readMenu(router, '/ip/hotspot/profile');
+  if (!r.ok) throw new Error(r.error);
+  const existing = r.rows.find((p) => p.name === name);
+  if (existing) {
+    await router.patch('/ip/hotspot/profile', existing['.id'], body);
+    return { updated: name, detail: `profile ${name} (hotspot-address=${address || '-'})` };
+  }
+  await router.add('/ip/hotspot/profile', { name, ...body });
+  return { created: name, detail: `profile ${name} (hotspot-address=${address || '-'})` };
+}
+
+// The hotspot server entry. Its NAME must be the portal host: the hotspot HTML
+// variable $(server-name) is this entry's name, and Tikspot's shim redirects to
+// http://$(server-name)/login. One server per interface — an existing one is
+// renamed/re-profiled rather than a second one added.
+export async function ensureHotspotServer(router, { name, interface: iface, profile }) {
+  if (!name) throw configError('no server-name configured — the hotspot server must be named after the portal host');
+  if (!iface) throw configError('no hotspot interface given');
+  const r = await readMenu(router, '/ip/hotspot');
+  if (!r.ok) throw new Error(r.error);
+  const existing = r.rows.find((s) => s.interface === iface) || r.rows.find((s) => s.name === name);
+  const body = { name, interface: iface, profile, disabled: 'no' };
+  if (existing) {
+    await router.patch('/ip/hotspot', existing['.id'], { ...body, comment: mergeComment(existing.comment) });
+    return { updated: name, detail: `hotspot server ${name} on ${iface} (profile ${profile})` };
+  }
+  await router.add('/ip/hotspot', { ...body, comment: MANAGED_COMMENT });
+  return { created: name, detail: `hotspot server ${name} on ${iface} (profile ${profile})` };
+}
+
+// Hotspot clients must use the router as their resolver, or Tikspot's DNS
+// static for the server-name is never consulted. Only fills an EMPTY
+// dns-server on the DHCP network that serves the interface — never creates
+// DHCP servers/pools (that is network design, not ours to guess).
+export async function ensureDhcpDns(router, { interface: iface }) {
+  const { ip } = await interfaceAddress(router, iface);
+  const r = await readMenu(router, '/ip/dhcp-server/network');
+  if (!r.ok) throw new Error(r.error);
+  const net = r.rows.find((n) => n.address && cidrCovers(n.address, ip));
+  if (!net) {
+    return {
+      status: 'skipped',
+      detail: `no /ip/dhcp-server/network covers ${ip} — if clients get DHCP elsewhere, make sure they use ${ip} as DNS`,
+    };
+  }
+  if (String(net['dns-server'] || '').trim()) {
+    return { detail: `${net.address} already has dns-server=${net['dns-server']}` };
+  }
+  await router.patch('/ip/dhcp-server/network', net['.id'], { 'dns-server': ip, comment: mergeComment(net.comment) });
+  return { updated: net.address, detail: `${net.address} dns-server=${ip}` };
+}
+
 // List every router object Tikspot manages (tagged with MANAGED_COMMENT), grouped
 // by menu, with only safe fields (never secrets). Powers the admin "router objects"
 // view so the operator can see exactly what Tikspot configured. Each group is
@@ -327,17 +423,37 @@ export async function listManaged(router) {
 // unreachable? }. A step that fails is recorded and the rest still run, unless the
 // failure looks network-level (no HTTP status), in which case the remainder are
 // marked 'skipped' and `unreachable` is set.
-export async function autoConfigure(router, { containerIp, nasSecret, serverHost, profiles = null } = {}) {
+//
+// `hotspot: { interface, profileName, dnsName }` (optional) additionally
+// provisions the hotspot itself: profile, server (named after serverHost) and
+// the DHCP network's DNS server.
+export async function autoConfigure(router, { containerIp, nasSecret, serverHost, profiles = null, hotspot = null } = {}) {
   // A literal-IP server-name resolves itself, so only a real hostname needs a DNS
   // static + host walled-garden entry.
   const host = serverHost && !isIpHost(serverHost) ? serverHost : null;
+  const hs = hotspot && hotspot.interface ? { profileName: 'tikspot', ...hotspot } : null;
+  if (hs && !hs.profileName) hs.profileName = 'tikspot';
 
   const plan = [
     { step: 'radius-client', run: () => ensureRadiusClient(router, { address: containerIp, secret: nasSecret }) },
     { step: 'radius-incoming', run: () => ensureRadiusIncoming(router, {}) },
+    // The new profile must exist before configureHotspotProfile filters by name.
+    ...(hs
+      ? [{
+          step: 'hotspot-profile-ensure',
+          run: () => ensureHotspotProfile(router, { name: hs.profileName, interface: hs.interface, dnsName: hs.dnsName, serverHost }),
+        }]
+      : []),
     { step: 'hotspot-profile', run: () => configureHotspotProfile(router, { profiles }) },
+    ...(hs
+      ? [{
+          step: 'hotspot-server',
+          run: () => ensureHotspotServer(router, { name: serverHost, interface: hs.interface, profile: hs.profileName }),
+        }]
+      : []),
     ...(host ? [{ step: 'dns-static', run: () => ensureDnsStatic(router, { name: host, address: containerIp }) }] : []),
     ...(host ? [{ step: 'dns-remote-requests', run: () => ensureDnsRemoteRequests(router) }] : []),
+    ...(hs ? [{ step: 'dhcp-dns', run: () => ensureDhcpDns(router, { interface: hs.interface }) }] : []),
     { step: 'walled-garden', run: () => ensureWalledGarden(router, { address: containerIp, host }) },
   ];
 
@@ -358,12 +474,15 @@ export async function autoConfigure(router, { containerIp, nasSecret, serverHost
       steps.push({ step, status: 'failed', detail: msg });
       if (!error) error = msg;
       // No HTTP status => transport-level failure (DNS/TCP/TLS/timeout): the rest
-      // will fail the same way, so stop hammering the router.
-      if (!err?.status) unreachable = true;
+      // will fail the same way, so stop hammering the router. A problem we
+      // detected ourselves (err.local) is config, not transport.
+      if (!err?.status && !err?.local) unreachable = true;
     }
   }
 
-  const ok = steps.every((s) => s.status === 'done');
+  // A step may itself report 'skipped' (nothing to do, e.g. no DHCP network) —
+  // that is not a failure. Unreachable-skips always come with a failed step.
+  const ok = steps.every((s) => s.status === 'done' || s.status === 'skipped');
   const out = { ok, steps };
   if (error) out.error = error;
   if (unreachable) out.unreachable = true;
@@ -473,6 +592,30 @@ export async function verifyConfig(router, { containerIp, serverHost } = {}) {
         raw: srv ? fmt('/ip/hotspot', srv, ['name', 'interface', 'profile']) : '',
       }));
     }
+  }
+
+  // --- Hotspot server named after the portal host --------------------------
+  // $(server-name) in the hotspot HTML is the /ip/hotspot entry's NAME, and the
+  // Tikspot shim redirects guests to http://$(server-name)/login — so a server
+  // called "hotspot1" sends phones to a host that doesn't resolve.
+  if (host) {
+    const c = `Hotspot server is named ${host}`;
+    const o = {
+      docs: 'hotspot-profile',
+      hint: 'The hotspot HTML variable $(server-name) is the /ip/hotspot server\'s name; Tikspot redirects guests to http://$(server-name)/login, so the server must be named after the portal host.',
+    };
+    let check;
+    if (!servers.ok) check = unknown(c, servers, o);
+    else {
+      const srv = servers.rows.find((s) => String(s.name || '').split('|')[0].trim() === host);
+      const names = servers.rows.map((s) => s.name).filter(Boolean);
+      check = mk(c, srv ? 'pass' : 'fail', {
+        ...o,
+        detail: srv ? '' : names.length ? `hotspot server(s) named ${names.join(', ')} — none named ${host}` : 'no /ip/hotspot server is defined on the router',
+        raw: srv ? fmt('/ip/hotspot', srv, ['name', 'interface', 'profile']) : '',
+      });
+    }
+    checks.push({ id: 'hotspot-server-name', ...check });
   }
 
   // --- login-by methods ---------------------------------------------------

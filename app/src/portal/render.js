@@ -8,15 +8,10 @@
 // request.
 
 import fs from 'node:fs';
-import { renderBlocks, esc } from './widgets.js';
+import { renderBlocks, esc, errorBanner } from './widgets.js';
 import { normalizeDesign, pageBlocks } from '../design/model.js';
 
 const PORTAL_CSS = fs.readFileSync(new URL('./static/portal.css', import.meta.url), 'utf8');
-
-function errorBanner(error) {
-  if (!error) return '';
-  return `<div class="cp-error" role="alert">${esc(error)}</div>`;
-}
 
 // Admin-authored announcements targeted at the portal ("Pool closed 9-11",
 // "Maintenance tonight"). Rendered above the design's blocks so a guest can't
@@ -107,8 +102,9 @@ export function renderPortalPage(design, ctx = {}) {
   const pageStyle =
     `background:radial-gradient(120% 90% at 50% -10%, ${esc(t.pageBg2)} 0%, ${esc(t.pageBg)} 60%)${bgImage};` +
     `--cp-w:${esc(t.width)}px;--cp-accent:${esc(t.accent)};--cp-radius:${esc(t.radius)}px;` +
-    `--cp-font:${esc(t.font)},system-ui,sans-serif;--cp-card-bg:${esc(t.cardBg)};--cp-text:${esc(t.textColor)};` +
-    `min-height:100vh`;
+    `--cp-font:${esc(t.font)},system-ui,sans-serif;--cp-card-bg:${esc(t.cardBg)};--cp-text:${esc(t.textColor)}`;
+  // (min-height lives in portal.css as a 100vh/100dvh pair — an inline 100vh
+  // would defeat the dvh fallback and over-size the page in iOS captive sheets.)
 
   const cardClass = ['cp-card', t.logoPosition === 'left' ? 'cp-logo-left' : ''].filter(Boolean).join(' ');
 
@@ -127,7 +123,7 @@ export function renderPortalPage(design, ctx = {}) {
 <div class="cp-page" style="${pageStyle}">
 <div class="${cardClass}" data-btn-style="${esc(t.buttonStyle)}">
 ${directLoad ? directLoadNotice(ctx.hotspotHost) : ''}
-${errorBanner(ctx.error)}
+${ctx.errorClaimed ? '' : errorBanner(ctx.error)}
 ${announcementBanners(ctx.announcements)}
 ${blocksHtml}
 </div>

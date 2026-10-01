@@ -1,0 +1,66 @@
+#!/bin/sh
+# Tikspot pre-commit guard: refuse to commit private material.
+#
+#  1. Staged ADDED lines are checked against a private list of forbidden strings
+#     (credentials, customer/site names, internal addresses, guest names...).
+#     The list is NOT in the repo: local/forbidden-strings.txt (gitignored), or
+#     the file named by $TIKSPOT_FORBIDDEN. One fixed string per line, matched
+#     case-insensitively; blank lines and lines starting with # are ignored.
+#     No list -> this check is skipped with a notice (so a fresh clone still works).
+#  2. Staged PATHS under always-private locations are refused outright, even if
+#     someone used `git add -f`.
+#
+# Enable once per clone:   npm run hooks     (git config core.hooksPath scripts/hooks)
+# Bypass for one commit (you had better be sure):   git commit --no-verify
+#
+# The matched secret is never printed — only the file, the line number and which
+# list entry (by line number in the list) matched.
+
+root=$(git rev-parse --show-toplevel) || exit 0
+list=${TIKSPOT_FORBIDDEN:-$root/local/forbidden-strings.txt}
+fail=0
+
+# ---- 2. private paths -------------------------------------------------------
+private_paths='^(examples/rsi-docs/|local/|dist/|data/|\.claude/|changelog\.md$|changelog_detailed\.md$|failed_commands\.md$|launch\.md$|\.env($|\.))'
+bad_paths=$(git diff --cached --name-only --diff-filter=ACMR | grep -E "$private_paths" | grep -v '^\.env\.example$')
+if [ -n "$bad_paths" ]; then
+  echo "pre-commit: these staged paths are private and must not be committed:" >&2
+  echo "$bad_paths" | sed 's/^/    /' >&2
+  fail=1
+fi
+
+# ---- 1. forbidden strings in added lines -------------------------------------
+if [ ! -f "$list" ]; then
+  echo "pre-commit: no forbidden-strings list at $list — content check skipped." >&2
+else
+  pats=$(mktemp) || exit 1
+  trap 'rm -f "$pats"' EXIT
+  # strip CRs, comments and blank lines
+  tr -d '\r' < "$list" | grep -v '^[[:space:]]*#' | grep -v '^[[:space:]]*$' > "$pats"
+  if [ -s "$pats" ]; then
+    # Matching is done in awk (lower-cased substring search) rather than
+    # `grep -i -F -f`: GNU grep 3.0 as shipped with Git for Windows silently
+    # matches nothing for that flag combination.
+    out=$(git diff --cached -U0 --no-color --diff-filter=ACMR -- . ':(exclude)*package-lock.json' | awk -v patfile="$pats" '
+      BEGIN { while ((getline p < patfile) > 0) { np++; pat[np] = tolower(p) } }
+      /^\+\+\+ / { file = substr($0, 7); next }          # "+++ b/<path>"
+      /^@@/ { split($3, a, ","); n = substr(a[1], 2) + 0; next }
+      /^\+/ {
+        line = tolower(substr($0, 2)); hit = ""
+        for (i = 1; i <= np; i++) if (index(line, pat[i]) > 0) hit = hit (hit == "" ? "" : ",") i
+        if (hit != "") print "pre-commit: forbidden string in " file ":" n " (list entry " hit ")"
+        n++
+      }')
+    if [ -n "$out" ]; then
+      echo "$out" >&2
+      fail=1
+    fi
+  fi
+fi
+
+if [ "$fail" -ne 0 ]; then
+  echo "pre-commit: commit blocked. Remove the private content (or, if it is a false positive," >&2
+  echo "            adjust local/forbidden-strings.txt). Entry numbers count non-blank, non-comment lines." >&2
+  exit 1
+fi
+exit 0

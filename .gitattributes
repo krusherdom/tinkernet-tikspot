@@ -19,3 +19,4 @@ docker/s6/s6-rc.d/**/type  text eol=lf
 # Hotspot HTML/JS templates served to clients — keep LF for consistency.
 *.html          text eol=lf
 *.json          text eol=lf
+scripts/hooks/* text eol=lf

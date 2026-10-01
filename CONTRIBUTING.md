@@ -32,6 +32,21 @@ npm run build:local   # amd64 image + the <250 MB size gate
 The image **must stay under 250 MB** so it fits hotspot-class MikroTik devices — the build
 gate (`scripts/check-size.mjs`) enforces this and CI will fail a PR that exceeds it.
 
+### Keeping private data out of commits
+
+If you work against real routers or guest systems, enable the pre-commit guard once per clone:
+
+```sh
+npm run hooks
+```
+
+It refuses commits that stage always-private paths (`local/`, `.env`, the changelog and
+scratch files listed in `.gitignore`) and, if you create `local/forbidden-strings.txt`, any
+added line containing one of your private strings — customer names, internal hostnames and
+addresses, account numbers, fragments of secrets. See
+`scripts/hooks/forbidden-strings.example.txt` for the format. The list itself is gitignored and
+the hook never prints the matched text, only the file, line and list entry.
+
 ## Pull requests
 
 1. Fork the repo and create a topic branch off `main`.

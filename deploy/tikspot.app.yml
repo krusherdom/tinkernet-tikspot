@@ -1,37 +1,108 @@
 # Tikspot — RouterOS container "App" manifest (RouterOS 7.22+).
 #
-# Adding this as a RouterOS App makes the router AUTO-PROVISION the network: it creates
-# the veth, adds it to the chosen bridge, assigns an IP and the NAT rules — no manual
-# /interface/veth, /interface/bridge/port or /ip/address steps. See docs/deploy-app.md
-# for the full walk-through (registry, /app add, and the first-run wizard).
+# Adding this as a RouterOS App makes the router AUTO-PROVISION the container's network
+# (veth, bridge membership, IP, NAT, port map) and pull the image. From 0.17 the container
+# also configures ITSELF — and optionally the router's hotspot — from the environment
+# below, so a new site needs no clicking through the first-run wizard.
 #
-# This file is the compose-style `yaml:` manifest. The network mode (lan|internal) is
-# chosen at add time — `/app add network=lan ...` — not in this file.
+# Quick start (see docs/deploy-app.md for the full walk-through and variable reference):
+#
+#   /user add name=tikspot group=full password="<api-password>"      ;# REST user for auto-configure
+#   /app/add network=internal yaml=[/file/get tikspot.app.yml contents]
+#   /app/set tikspot environment="TIKSPOT_ADMIN_PASSWORD=<admin-pw>,TIKSPOT_ROUTER_PASSWORD=<api-password>,TIKSPOT_SERVER_NAME=portal.example.com,TIKSPOT_HOTSPOT_INTERFACE=<guest-bridge>"
+#   /app/enable tikspot
+#
+# `network=internal` gives the container its own NATed subnet, routed by the router. Use it
+# rather than putting the container on the guest bridge: access points with client
+# isolation only let guests talk to the gateway, so a portal sitting on the guest subnet
+# is unreachable. (`network=lan` puts it on the LAN bridge instead.)
+#
+# Values written as [placeholder] are filled in by RouterOS at start. Anything you do not
+# set is simply left for the admin UI — every variable is optional.
 
 name: tikspot
 descr: Captive portal + FreeRADIUS hotspot manager for MikroTik
 page: https://github.com/krusherdom/tinkernet-tikspot
 category: network
-default-credentials: set-at-first-run-wizard
+default-credentials: admin password = TIKSPOT_ADMIN_PASSWORD (or set in the first-run wizard)
 url-path: /admin
+supported-archs:
+  - arm64
+  - x86
+
+# Declared so they can be referenced as [secret:name] below instead of being typed into
+# the environment in clear text. Unset secrets are ignored by the container.
+secrets:
+  admin_password:
+  router_password:
+  nas_secret:
+
 services:
   tikspot:
     # Multi-arch public image (arm64 + amd64) published by the repo's release workflow.
-    # RouterOS pulls the variant matching your router's CPU automatically. Pin a release
-    # tag (or use :latest). See docs/deploy-app.md for the registry setup.
-    image: ghcr.io/krusherdom/tinkernet-tikspot:0.10.0
-    ports:
-      # Admin UI + captive portal (HTTP). Exposed on the router's address:8088 for admin
-      # convenience (http://<router>:8088/admin); hotspot clients reach the portal at the
-      # container's OWN IP on :80 (via the hotspot redirect + walled-garden the wizard adds).
-      - "8088:80:tcp"
-    volumes:
-      # Persistent: plans, vouchers, accounts, page designs, settings, branding uploads.
-      - "data:/data"
+    # Pin a release tag for production; RouterOS pulls the variant matching the router's CPU.
+    image: ghcr.io/krusherdom/tinkernet-tikspot:0.17.0
+    container_name: tikspot
+    hostname: tikspot
     restart: unless-stopped
-    # The RADIUS shared secret (TIKSPOT_NAS_SECRET) is intentionally NOT set here. On first
-    # boot the container generates a UNIQUE random secret, and the admin wizard's
-    # Auto-configure syncs it to the router's /radius client — so every install gets its
-    # own secret (never ship a shared one publicly). To pin a known value instead, add:
-    #   environment:
-    #     TIKSPOT_NAS_SECRET: "your-strong-secret"
+    ports:
+      # Admin UI + captive portal (HTTP), published on the router at :8088 and proxied as
+      # the App's UI URL. Hotspot guests reach the portal at the container's own IP on :80
+      # (walled-garden entry added by auto-configure); RADIUS (1812/1813) is reached by the
+      # router directly on the container IP, so it needs no mapping here.
+      - "8088:80:web"
+    volumes:
+      # Persistent: database (plans, vouchers, accounts, designs, settings), branding
+      # uploads. Put a backup zip at data/import/backup.zip to restore it on first boot.
+      - "data:/data"
+    healthcheck:
+      test: ["CMD", "curl -fsS http://localhost/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    environment:
+      # ---- how the supplied values are applied ---------------------------------------
+      # seed    = only fill settings that are still unset (changes made in the UI stick)
+      # enforce = these values win on every boot
+      TIKSPOT_BOOTSTRAP: seed
+
+      # ---- admin ---------------------------------------------------------------------
+      TIKSPOT_ADMIN_PASSWORD: "[secret:admin_password]"
+      # Locked out? Set this to 1, restart the app once, then set it back to 0.
+      TIKSPOT_ADMIN_PASSWORD_RESET: "0"
+
+      # ---- where the container lives / how it reaches the router ----------------------
+      TIKSPOT_CONTAINER_IP: "[containerIP]"
+      TIKSPOT_ROUTER_HOST: "[routerIP]"
+      TIKSPOT_ROUTER_SCHEME: http
+      TIKSPOT_ROUTER_USER: tikspot
+      TIKSPOT_ROUTER_PASSWORD: "[secret:router_password]"
+      TIKSPOT_NAS_SECRET: "[secret:nas_secret]"
+
+      # ---- portal identity ------------------------------------------------------------
+      # A REAL hostname you control (never .local, never a made-up TLD): it becomes the
+      # hotspot server's name and the URL guests are sent to. Defaults to the container IP.
+      TIKSPOT_SERVER_NAME: "[containerIP]"
+      TIKSPOT_PORTAL_TITLE: "Connect to Wi-Fi"
+
+      # ---- configure the router at boot (needs the API user above) ---------------------
+      # 1 = once per configuration, always = every boot, 0 = never (use the UI instead)
+      TIKSPOT_AUTOCONFIGURE: "1"
+      # Guest bridge/interface to run the hotspot on. Leave empty to manage only the
+      # RADIUS client, DNS static and walled garden and create the hotspot yourself.
+      TIKSPOT_HOTSPOT_INTERFACE: ""
+      # Optional name for the router's own hotspot endpoint; must differ from the server name.
+      TIKSPOT_HOTSPOT_DNS_NAME: ""
+
+      # ---- optional: guest-lookup plugin ------------------------------------------------
+      # A bundled recipe id (e.g. rms-cloud-surname-room), a file under /data, or an https URL.
+      TIKSPOT_PLUGIN: ""
+      TIKSPOT_PLUGIN_ENABLED: "1"
+      TIKSPOT_PLUGIN_ATTACH: "1"
+      # Recipe secrets/params are passed as TIKSPOT_PLUGIN_SECRET_<key> / TIKSPOT_PLUGIN_PARAM_<key>,
+      # e.g. TIKSPOT_PLUGIN_SECRET_clientId, TIKSPOT_PLUGIN_PARAM_moduleType.
+
+      # ---- optional: restore a backup on first boot --------------------------------------
+      TIKSPOT_RESTORE_FILE: /data/import/backup.zip
+      TIKSPOT_RESTORE_MODE: fresh

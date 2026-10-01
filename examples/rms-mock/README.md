@@ -56,7 +56,7 @@ It exposes:
   (as on the real API).
 
 Default credentials (see `config.json`): agent ID `1000`, agent password
-`agent-secret`, client ID `11281`, client (Web Service) password `webservice-secret`.
+`agent-secret`, client ID `10042`, client (Web Service) password `webservice-secret`.
 
 ## Running it
 

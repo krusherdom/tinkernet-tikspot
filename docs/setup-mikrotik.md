@@ -82,7 +82,12 @@ The admin's **Router setup** tab can do this section for you (Test connection �
 ![Router setup tab](img/admin-router-setup.png)
 
 
-**Easiest: use the setup wizard.** Open `http://<container-ip>/admin` — on first run it
+**Zero-touch (0.17+).** Everything in this section can be done at boot from environment
+variables — `TIKSPOT_AUTOCONFIGURE=1` plus the router link, and `TIKSPOT_HOTSPOT_INTERFACE` to
+have the hotspot profile and server created too. See [`deploy-app.md`](deploy-app.md) for the
+variable reference; it works for App and file-based installs alike.
+
+**Otherwise: use the setup wizard.** Open `http://<container-ip>/admin` — on first run it
 walks you through setting an admin password and (optionally) connecting your MikroTik.
 On the **Router setup** step, enter the router's IP + API credentials, the container IP,
 the hotspot server-name and the RADIUS secret, then click **Auto-configure**. Over the
@@ -166,7 +171,8 @@ session to the container.
    `http://<container-ip>/login`.
 
 2. **Make the container reachable as the hotspot's server name.** The shim redirects
-   to `//$(server-name)/login`, so `server-name` must resolve to the container and be
+   to `http://$(server-name)/login` (explicit scheme, since the router may serve the shim over
+   HTTPS while the container speaks HTTP), so `server-name` must resolve to the container and be
    allowed through the walled-garden. Note the two walled-garden menus are **not**
    interchangeable: `dst-address` rules (matching by IP) live under
    `/ip/hotspot/walled-garden/ip`, while `dst-host` rules (matching by hostname) live

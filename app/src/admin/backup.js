@@ -21,7 +21,9 @@ const RESTORE_STAGE = path.join(DATA_DIR, 'tikspot.db.restore');
 // Settings that are secret. Stripped from a backup unless ?secrets=1 is passed,
 // so the default download is safe to share/store without leaking router creds,
 // the NAS secret, the cookie-signing secret, or the admin password hash.
-const SENSITIVE_KEYS = ['router_pass', 'nas_secret', 'session_secret', 'admin_password_hash', 'free_credentials'];
+// bootstrap_router_sig embeds sha256 hashes of the router password / NAS secret
+// (brute-forceable offline when weak), so it is redacted too.
+const SENSITIVE_KEYS = ['router_pass', 'nas_secret', 'session_secret', 'admin_password_hash', 'free_credentials', 'bootstrap_router_sig'];
 
 export default async function backupRoutes(app) {
   const db = app.db;
@@ -104,50 +106,72 @@ export default async function backupRoutes(app) {
     if (!file) return reply.code(400).send({ error: 'expected a backup .zip upload' });
     const buf = await file.toBuffer();
 
-    let zip;
+    let staged;
     try {
-      zip = await JSZip.loadAsync(buf);
-    } catch {
-      return reply.code(400).send({ error: 'not a valid zip file' });
+      staged = await applyBackupZip(buf);
+    } catch (err) {
+      if (err?.statusCode === 400) return reply.code(400).send({ error: err.message });
+      throw err;
     }
-    const dbEntry = zip.file('tikspot.db');
-    const metaEntry = zip.file('tikspot-backup.json');
-    if (!dbEntry || !metaEntry) {
-      return reply.code(400).send({ error: 'not a Tikspot backup (missing tikspot.db / tikspot-backup.json)' });
-    }
-
-    // Stage the DB; promoted on next boot by db-init.
-    fs.writeFileSync(RESTORE_STAGE, await dbEntry.async('nodebuffer'));
-
-    // Restore branding assets now (files, not the live DB).
-    fs.mkdirSync(ASSETS_DIR, { recursive: true });
-    let assetCount = 0;
-    for (const name of Object.keys(zip.files)) {
-      if (name.startsWith('assets/') && !zip.files[name].dir) {
-        const base = path.basename(name);
-        if (base) { fs.writeFileSync(path.join(ASSETS_DIR, base), await zip.files[name].async('nodebuffer')); assetCount++; }
-      }
-    }
-
-    let meta = {};
-    try { meta = JSON.parse(await metaEntry.async('string')); } catch { /* tolerate */ }
-    logAudit(db, req, 'restore.staged', `from v${meta.version ?? '?'}, ${assetCount} assets`);
+    logAudit(db, req, 'restore.staged', `from v${staged.from_version ?? '?'}, ${staged.assets_restored} assets`);
     return {
       ok: true,
       staged: true,
-      from_version: meta.version ?? null,
-      assets_restored: assetCount,
+      from_version: staged.from_version,
+      assets_restored: staged.assets_restored,
       message: 'Backup staged. Restart the container to complete the restore.',
     };
   });
 }
 
+function badBackup(message) {
+  const err = new Error(message);
+  err.statusCode = 400;
+  return err;
+}
+
+// Stage a backup zip for the next boot: write its DB to the restore-stage path
+// (promoted by promoteStagedRestore before the DB is opened) and extract its
+// branding assets now. Shared by POST /api/restore and the zero-touch
+// TIKSPOT_RESTORE_FILE bootstrap. Throws an Error with statusCode 400 when the
+// buffer is not a Tikspot backup. Paths are overridable for tests.
+export async function applyBackupZip(buf, { stagePath = RESTORE_STAGE, assetsDir = ASSETS_DIR } = {}) {
+  let zip;
+  try {
+    zip = await JSZip.loadAsync(buf);
+  } catch {
+    throw badBackup('not a valid zip file');
+  }
+  const dbEntry = zip.file('tikspot.db');
+  const metaEntry = zip.file('tikspot-backup.json');
+  if (!dbEntry || !metaEntry) {
+    throw badBackup('not a Tikspot backup (missing tikspot.db / tikspot-backup.json)');
+  }
+
+  // Stage the DB; promoted on next boot by db-init.
+  fs.writeFileSync(stagePath, await dbEntry.async('nodebuffer'));
+
+  // Restore branding assets now (files, not the live DB).
+  fs.mkdirSync(assetsDir, { recursive: true });
+  let assetCount = 0;
+  for (const name of Object.keys(zip.files)) {
+    if (name.startsWith('assets/') && !zip.files[name].dir) {
+      const base = path.basename(name);
+      if (base) { fs.writeFileSync(path.join(assetsDir, base), await zip.files[name].async('nodebuffer')); assetCount++; }
+    }
+  }
+
+  let meta = {};
+  try { meta = JSON.parse(await metaEntry.async('string')); } catch { /* tolerate */ }
+  return { from_version: meta.version ?? null, assets_restored: assetCount };
+}
+
 // Called by db-init (app/src/init.js) BEFORE the DB is opened: if a restore was
 // staged, replace the live DB with it and clear the WAL sidecars.
-export function promoteStagedRestore() {
-  if (!fs.existsSync(RESTORE_STAGE)) return false;
-  for (const suffix of ['-wal', '-shm']) fs.rmSync(DB_PATH + suffix, { force: true });
-  fs.rmSync(DB_PATH, { force: true });
-  fs.renameSync(RESTORE_STAGE, DB_PATH);
+export function promoteStagedRestore({ dbPath = DB_PATH, stagePath = RESTORE_STAGE } = {}) {
+  if (!fs.existsSync(stagePath)) return false;
+  for (const suffix of ['-wal', '-shm']) fs.rmSync(dbPath + suffix, { force: true });
+  fs.rmSync(dbPath, { force: true });
+  fs.renameSync(stagePath, dbPath);
   return true;
 }

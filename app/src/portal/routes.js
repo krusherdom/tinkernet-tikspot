@@ -103,6 +103,7 @@ export default async function portalRoutes(app) {
 
     const renderError = (message, code = 200) => {
       ctx.error = message;
+      ctx.errorPluginId = id; // lets the plugin-login block show it inline, by its own inputs
       reply.code(code).type('text/html').send(renderPortalPage(activeModel(db), ctx));
     };
 

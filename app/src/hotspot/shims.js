@@ -6,7 +6,9 @@
 // The flow: MikroTik serves login.html, whose
 // JS reads $(server-name) (a "host|label" convention), takes the host part, and
 // POSTs the session context (mac, ip, link-login, dst, error, chap-id,
-// chap-challenge, ...) to //<host>/login. <host> resolves to this container
+// chap-challenge, ...) to http://<host>/login (explicit scheme: the shim may be
+// served over HTTPS by the router while the container only speaks HTTP, and a
+// scheme-relative URL would inherit https). <host> resolves to this container
 // (router DNS static + walled-garden), which renders the real page.
 //
 // The files are mostly static — MikroTik substitutes the $(...) variables at
@@ -40,7 +42,7 @@ function redirectShim(title, path, loading) {
   <meta name="viewport" content="width=device-width, initial-scale=1">
 </head>
 <body style="font-family:sans-serif;text-align:center;padding:40px;color:#444">
-  <form name="tikspot" id="tikspot-form" method="post" action="//$(server-name)${path}">
+  <form name="tikspot" id="tikspot-form" method="post" action="http://$(server-name)${path}">
 ${contextFields()}
   </form>
   <p id="msg">${loading}</p>
@@ -49,7 +51,7 @@ ${contextFields()}
     var sn = '$(server-name)';
     var host = sn.split('|')[0];
     var f = document.getElementById('tikspot-form');
-    f.setAttribute('action', '//' + host + '${path}');
+    f.setAttribute('action', 'http://' + host + '${path}');
     f.submit();
   </script>
 </body>
@@ -79,7 +81,7 @@ function apiJson() {
   // RFC 8908 captive-portal API. Points clients at the container-hosted page.
   return `{
   "captive": $(if logged-in == 'yes')false$(else)true$(endif),
-  "user-portal-url": "//$(server-name)${PORTAL.login}"
+  "user-portal-url": "http://$(server-name)${PORTAL.login}"
 }
 `;
 }

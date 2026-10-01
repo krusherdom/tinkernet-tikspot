@@ -148,6 +148,17 @@
     }
   }
 
+  // A login error (wrong room/surname, bad voucher, ...) must be seen: bring it
+  // into view and focus it so screen readers announce it. Only runs when an
+  // error is present, so a clean page load always starts at the top.
+  function showError() {
+    var e = document.getElementById('tk-error');
+    if (!e) return;
+    try { e.scrollIntoView({ block: 'center' }); } catch (err) { e.scrollIntoView(); }
+    try { e.focus({ preventScroll: true }); } catch (err) { /* older webviews */ }
+    e.classList.add('flash');
+  }
+
   function init() {
     var forms = document.querySelectorAll('form[data-tikspot-login]');
     for (var i = 0; i < forms.length; i++) {
@@ -164,6 +175,7 @@
     }
     wireTerms();
     wireAutosubmit();
+    showError();
   }
 
   if (document.readyState === 'loading') {

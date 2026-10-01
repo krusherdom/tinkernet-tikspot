@@ -210,6 +210,43 @@ async function debugFetch(recipe, inputs) {
   }
 }
 
+// GET a JSON document (catalog index, GitHub folder listing or plugin file).
+export async function fetchJson(url) {
+  const r = await httpRequest({
+    url,
+    method: 'GET',
+    headers: { Accept: 'application/vnd.github+json, application/json;q=0.9, */*;q=0.1', 'User-Agent': 'tikspot-plugin-catalog' },
+    timeoutMs: 10000,
+  });
+  if (r.status < 200 || r.status >= 300) {
+    const err = new Error(`HTTP ${r.status} from ${url}`);
+    err.status = r.status;
+    throw err;
+  }
+  try {
+    return JSON.parse(r.text);
+  } catch {
+    throw new Error(`response from ${url} is not JSON`);
+  }
+}
+
+// Fetch one plugin file by URL (GitHub web/raw URLs normalised) and unwrap its
+// recipe. Shared by POST /api/plugins/catalog/import and the zero-touch
+// TIKSPOT_PLUGIN=<url> bootstrap. Never throws:
+//   { ok:true, recipe, fetchUrl } | { ok:false, status, error }
+export async function fetchCatalogRecipe(url, { fetch = fetchJson } = {}) {
+  const res = resolveSource(String(url || '').trim());
+  if (!res.ok) return { ok: false, status: 400, error: res.error };
+  let recipe;
+  try {
+    recipe = extractRecipe(await fetch(res.fetchUrl));
+  } catch (err) {
+    return { ok: false, status: 502, error: `could not fetch the plugin: ${String(err?.message || err)}` };
+  }
+  if (!recipe) return { ok: false, status: 400, error: 'that file is not a Tikspot plugin export' };
+  return { ok: true, recipe, fetchUrl: res.fetchUrl };
+}
+
 export default async function pluginRoutes(app) {
   const db = app.db;
 
@@ -227,25 +264,6 @@ export default async function pluginRoutes(app) {
   });
 
   // ---- Catalog: browse recipes published on GitHub / any HTTP host ----------
-  async function fetchJson(url) {
-    const r = await httpRequest({
-      url,
-      method: 'GET',
-      headers: { Accept: 'application/vnd.github+json, application/json;q=0.9, */*;q=0.1', 'User-Agent': 'tikspot-plugin-catalog' },
-      timeoutMs: 10000,
-    });
-    if (r.status < 200 || r.status >= 300) {
-      const err = new Error(`HTTP ${r.status} from ${url}`);
-      err.status = r.status;
-      throw err;
-    }
-    try {
-      return JSON.parse(r.text);
-    } catch {
-      throw new Error(`response from ${url} is not JSON`);
-    }
-  }
-
   // GET /api/plugins/catalog?source=<url>  (default: the plugin_catalog_url setting)
   app.get('/api/plugins/catalog', async (req, reply) => {
     const source = String(req.query?.source || getTyped(db, 'plugin_catalog_url') || DEFAULT_CATALOG_URL);
@@ -289,19 +307,13 @@ export default async function pluginRoutes(app) {
   // POST /api/plugins/catalog/import {url}  -> fetch one plugin file and import it (disabled).
   app.post('/api/plugins/catalog/import', async (req, reply) => {
     const url = String(req.body?.url || '').trim();
-    const res = resolveSource(url);
-    if (!res.ok) return reply.code(400).send({ error: res.error });
-    let recipe;
-    try {
-      recipe = extractRecipe(await fetchJson(res.fetchUrl));
-    } catch (err) {
-      return reply.code(502).send({ error: `could not fetch the plugin: ${String(err?.message || err)}` });
-    }
-    if (!recipe) return reply.code(400).send({ error: 'that file is not a Tikspot plugin export' });
+    const fetched = await fetchCatalogRecipe(url);
+    if (!fetched.ok) return reply.code(fetched.status).send({ error: fetched.error });
+    const recipe = fetched.recipe;
     // importPlugin() itself blanks secrets and forces enabled:false — the admin reviews first.
     const result = importPlugin(db, recipe);
     if (!result.ok) return reply.code(400).send({ error: result.error, fields: result.fields });
-    logAudit(db, req, 'plugin.catalog-import', `#${result.id} from ${res.fetchUrl}`);
+    logAudit(db, req, 'plugin.catalog-import', `#${result.id} from ${fetched.fetchUrl}`);
     return { ok: true, id: result.id, name: recipe.name || '' };
   });
 

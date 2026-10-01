@@ -1,6 +1,6 @@
 {
   "name": "tikspot",
-  "version": "0.16.1",
+  "version": "0.17.0",
   "private": true,
   "description": "MikroTik hotspot container: FreeRADIUS + live captive portal + admin portal",
   "scripts": {
@@ -15,7 +15,8 @@
     "cloudbeds-mock": "node examples/cloudbeds-mock/server.js",
     "eventbrite-mock": "node examples/eventbrite-mock/server.js",
     "csv-guest-list": "node examples/csv-guest-list/serve.js",
-    "test": "cd app && npm test"
+    "test": "cd app && npm test",
+    "hooks": "git config core.hooksPath scripts/hooks"
   },
   "license": "MIT"
 }

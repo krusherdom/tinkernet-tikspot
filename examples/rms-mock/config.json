@@ -1,10 +1,10 @@
 {
   "agentId": 1000,
   "agentPassword": "agent-secret",
-  "clientId": 11281,
+  "clientId": 10042,
   "clientPassword": "webservice-secret",
-  "rmsClientId": 11281,
+  "rmsClientId": 10042,
   "allowedProperties": [
-    { "clientId": 11281, "clientName": "Tikspot Demo Resort" }
+    { "clientId": 10042, "clientName": "Tikspot Demo Resort" }
   ]
 }

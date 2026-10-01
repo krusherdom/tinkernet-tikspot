@@ -144,7 +144,7 @@ TLS, port 8091), then in the imported recipe:
    container can't reach `127.0.0.1` on your workstation, so use your machine's LAN IP,
    not `localhost`.
 2. Fill in the mock's sample credentials (agent ID `1000` / password `agent-secret`,
-   client ID `11281` / password `webservice-secret`).
+   client ID `10042` / password `webservice-secret`).
 3. Save and run **Test lookup**.
 
 See `examples/rms-mock/README.md` for sample rooms/guests to try. Set the base URL back

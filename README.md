@@ -187,8 +187,10 @@ GitHub folder, `index.json` or single exported file to use your own catalog.
 
 Two paths, depending on RouterOS version:
 
-1. **RouterOS 7.22+ — container "App"** *(simplest; auto-provisions the network)*: add
-   [`deploy/tikspot.app.yml`](deploy/tikspot.app.yml) with `/app add network=lan` and the
+1. **RouterOS 7.22+ — container "App"** *(simplest; zero-touch)*: add
+   [`deploy/tikspot.app.yml`](deploy/tikspot.app.yml) with `/app add network=internal`, pass the
+   site's values (admin password, server name, guest bridge, optional PMS plugin) as environment
+   variables, and the container configures itself and the router's hotspot at boot. The
    router pulls the public multi-arch image (`ghcr.io/krusherdom/tinkernet-tikspot`,
    published on each release tag) and creates the veth, bridge port, IP and NAT for you.
    See [`docs/deploy-app.md`](docs/deploy-app.md).

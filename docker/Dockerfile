@@ -89,6 +89,9 @@ COPY --from=app-build /app/node_modules ./node_modules
 COPY --from=app-build /app/src ./src
 COPY --from=app-build /app/public ./public
 COPY --from=app-build /app/package.json ./package.json
+# Bundled guest-lookup plugin recipes (repo-root plugins/), so TIKSPOT_PLUGIN can
+# name one by id (e.g. rms-cloud-surname-room) with no network access.
+COPY plugins/ ./plugins/
 
 # s6 service tree + init scripts.
 COPY docker/s6/s6-rc.d/ /etc/s6-overlay/s6-rc.d/
@@ -113,6 +116,19 @@ RUN set -eux; \
           /etc/s6-overlay/s6-rc.d/node/dependencies.d/db-init; \
     mkdir -p /data /var/run/radiusd
 
+# Zero-touch bootstrap (all optional, no defaults baked in; see
+# app/src/bootstrap/env.js). Secret-ish ones also accept <NAME>_FILE.
+#   TIKSPOT_BOOTSTRAP=seed|enforce            seed fills unset values; enforce: env wins every boot
+#   TIKSPOT_ADMIN_PASSWORD(_FILE), TIKSPOT_ADMIN_PASSWORD_RESET, TIKSPOT_SETUP_COMPLETE
+#   TIKSPOT_ROUTER_HOST, TIKSPOT_ROUTER_SCHEME, TIKSPOT_ROUTER_USER, TIKSPOT_ROUTER_PASSWORD(_FILE)
+#   TIKSPOT_CONTAINER_IP, TIKSPOT_SERVER_NAME, TIKSPOT_NAS_SECRET(_FILE), TIKSPOT_PORTAL_TITLE,
+#   TIKSPOT_LOGIN_METHOD, TIKSPOT_HOTSPOT_PROFILES
+#   TIKSPOT_AUTOCONFIGURE=0|1|always, TIKSPOT_HOTSPOT_INTERFACE, TIKSPOT_HOTSPOT_DNS_NAME,
+#   TIKSPOT_HOTSPOT_PROFILE_NAME
+#   TIKSPOT_PLUGIN (bundled id | /path.json | https://...), TIKSPOT_PLUGIN_NAME,
+#   TIKSPOT_PLUGIN_ENABLED, TIKSPOT_PLUGIN_ATTACH, TIKSPOT_PLUGIN_SECRET_<key>(_FILE),
+#   TIKSPOT_PLUGIN_PARAM_<key>, TIKSPOT_PLUGINS_DIR
+#   TIKSPOT_RESTORE_FILE, TIKSPOT_RESTORE_MODE=fresh|once
 ENV TIKSPOT_HOST=0.0.0.0 \
     TIKSPOT_PORT=80 \
     TIKSPOT_DB=/data/tikspot.db \

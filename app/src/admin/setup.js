@@ -32,7 +32,7 @@ import { buildHelp } from './help.js';
 
 const COOKIE = 'tikspot_sess';
 
-function serverHostOf(serverName) {
+export function serverHostOf(serverName) {
   return String(serverName || '').split('|')[0].trim();
 }
 
@@ -52,6 +52,35 @@ export function routerFromSettings(db) {
     username: getSetting(db, 'router_user', 'admin'),
     password: getSetting(db, 'router_pass', ''),
   });
+}
+
+// The body of Auto-configure, shared by POST /api/setup/autoconfig and the
+// zero-touch router bootstrap (bootstrap/router.js). Pushes the stored
+// settings to the router, then makes the container accept exactly the secret
+// the router was given. Returns autoConfigure's result (+ `warning` when the
+// radiusd reload failed); sets router_configured on success. Throws only when
+// no router is configured. `router` / `applyNas` are injectable for tests.
+export async function runAutoConfigure(db, { hotspot = null, router = routerFromSettings(db), applyNas = applyNasSecret } = {}) {
+  if (!router) throw new Error('router not configured');
+  // Ensure a real shared secret exists (generates + persists a strong random
+  // one if the admin didn't set one) — never the old "testing123" placeholder.
+  const result = await autoConfigure(router, {
+    containerIp: getSetting(db, 'container_ip', ''),
+    nasSecret: ensureNasSecret(db),
+    serverHost: serverHostOf(getSetting(db, 'server_name', '')),
+    profiles: hotspotProfilesSetting(db),
+    hotspot,
+  });
+
+  // Make the container accept exactly the secret we just gave the router.
+  const { degraded } = await applyNas(db);
+  if (degraded) {
+    result.warning = 'RADIUS secret written but radiusd reload failed — restart the container';
+    logEvent(db, 'warn', 'radius', 'radiusd reload failed after secret change');
+  }
+
+  if (result.ok) setSetting(db, 'router_configured', '1');
+  return result;
 }
 
 export default async function setupRoutes(app) {
@@ -152,23 +181,7 @@ export default async function setupRoutes(app) {
     const router = routerFromSettings(db);
     if (!router) return reply.code(400).send({ error: 'router not configured' });
     try {
-      // Ensure a real shared secret exists (generates + persists a strong random
-      // one if the admin didn't set one) — never the old "testing123" placeholder.
-      const result = await autoConfigure(router, {
-        containerIp: getSetting(db, 'container_ip', ''),
-        nasSecret: ensureNasSecret(db),
-        serverHost: serverHostOf(getSetting(db, 'server_name', '')),
-        profiles: hotspotProfilesSetting(db),
-      });
-
-      // Make the container accept exactly the secret we just gave the router.
-      const { degraded } = await applyNasSecret(db);
-      if (degraded) {
-        result.warning = 'RADIUS secret written but radiusd reload failed — restart the container';
-        logEvent(db, 'warn', 'radius', 'radiusd reload failed after secret change');
-      }
-
-      if (result.ok) setSetting(db, 'router_configured', '1');
+      const result = await runAutoConfigure(db, { router });
       logAudit(db, req, 'router.autoconfig', result.ok ? 'ok' : `failed: ${result.error || 'unknown'}`);
 
       // A step actually completing means the router was reachable — only refuse

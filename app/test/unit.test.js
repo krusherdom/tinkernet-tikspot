@@ -235,7 +235,8 @@ function verifyFixtures({ containerIp, serverHost, radius = 'ok' } = {}) {
     '/radius': radius === 'ok' ? [{ '.id': '*1', address: containerIp, service: 'hotspot', comment: 'x' }] : [],
     '/radius/incoming': { accept: 'yes', port: '3799' },
     '/ip/hotspot/profile': [{ '.id': '*2', name: 'default', 'use-radius': 'yes', 'login-by': 'mac-cookie,http-chap,http-pap,mac' }],
-    '/ip/hotspot': [{ '.id': '*3', name: 'hs1', interface: 'bridge1', profile: 'default' }],
+    // Named after the portal host — $(server-name) is the server entry's name.
+    '/ip/hotspot': [{ '.id': '*3', name: serverHost, interface: 'bridge1', profile: 'default' }],
     '/ip/dns/static': [{ '.id': '*4', name: serverHost, address: containerIp }],
     '/ip/dns': { 'allow-remote-requests': 'yes' },
     '/ip/hotspot/walled-garden/ip': [{ '.id': '*5', action: 'accept', 'dst-address': containerIp }],

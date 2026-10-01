@@ -15,6 +15,16 @@ export function esc(s) {
     .replaceAll("'", '&#39;');
 }
 
+// The login-error banner. `id="tk-error"` + tabindex let portal.js scroll it
+// into view and focus it on load, so a guest on a small captive-portal sheet
+// actually sees it. Rendered either inside the form that produced the error
+// (see 'plugin-login') or, when no block claims it, at the top of the card
+// (render.js).
+export function errorBanner(error) {
+  if (!error) return '';
+  return `<div class="cp-error" id="tk-error" role="alert" tabindex="-1">${esc(error)}</div>`;
+}
+
 const alignClass = (a) => `cp-al-${a === 'left' || a === 'right' ? a : 'center'}`;
 
 function routerFields(ctx) {
@@ -180,9 +190,18 @@ const RENDERERS = {
       `<input type="hidden" name="dst" value="${esc(ctx.dst ?? '')}">` +
       `<input type="hidden" name="chap-id" value="${esc(ctx.chapId ?? '')}">` +
       `<input type="hidden" name="chap-challenge" value="${esc(ctx.chapChallenge ?? '')}">`;
+    // A failed lookup for THIS plugin shows its error right above the inputs
+    // the guest just used (and marks it claimed so render.js doesn't repeat it
+    // at the top of the card).
+    let inlineError = '';
+    if (ctx.error && ctx.errorPluginId !== undefined && String(ctx.errorPluginId) === String(plugin.id) && !ctx.errorClaimed) {
+      inlineError = errorBanner(ctx.error);
+      ctx.errorClaimed = true;
+    }
     return (
       `<form class="cp-form" method="post" action="${action}" data-tikspot-lookup>` +
       intro +
+      inlineError +
       inputsHtml +
       hiddenCtx +
       `<button type="submit" class="cp-btn">${esc(p.label || 'Continue')}</button>` +

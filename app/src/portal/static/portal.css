@@ -4,16 +4,24 @@
    The page background gradient is set inline per page. Shared by the live portal
    and the editor canvas preview so they look identical. */
 
+/* Safe centring: the page is a flex row that top-aligns its child, and the card
+   centres itself with margin:auto. When the card fits it sits in the middle;
+   when it is taller than the viewport (small phones, iOS's captive-portal
+   sheet) it pins to the top and scrolls normally. Plain align-items:center
+   would instead push the card's top above the scroll origin, where the logo
+   and any error banner can never be scrolled to. */
 .cp-page {
-  min-height: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   padding: 28px 18px;
   font-family: var(--cp-font, Helvetica, system-ui, sans-serif);
   -webkit-font-smoothing: antialiased;
 }
 .cp-card {
+  margin: auto;
   width: 100%;
   max-width: var(--cp-w, 420px);
   background: var(--cp-card-bg, #fff);
@@ -111,4 +119,8 @@ a.cp-btn { display: block; text-align: center; text-decoration: none; box-sizing
 .cp-notice[class*="cp-notice--"] strong { display: block; margin-bottom: 2px; font-weight: 700; }
 .cp-notice--info a, .cp-notice--success a, .cp-notice--warning a, .cp-notice--danger a { color: inherit; }
 .cp-notice.flash { animation: cp-flash .9s ease; }
+.cp-form .cp-error { margin: 0 0 12px; }
+.cp-error:focus { outline: none; }
+.cp-error.flash { animation: cp-flash-err .9s ease; }
+@keyframes cp-flash-err { 0%,100% { box-shadow: 0 0 0 0 rgb(179 38 30 / 0) } 30% { box-shadow: 0 0 0 4px rgb(179 38 30 / 0.35) } }
 @keyframes cp-flash { 0%,100% { box-shadow: 0 0 0 0 rgb(245 181 68 / 0) } 30% { box-shadow: 0 0 0 4px rgb(245 181 68 / 0.5) } }

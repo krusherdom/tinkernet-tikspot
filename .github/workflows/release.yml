@@ -40,7 +40,9 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest
+            # :latest only moves for final releases — a pre-release tag (v0.17.0-rc.1) publishes
+            # just its own version tag, so routers pinned to :latest are not upgraded to an rc.
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
 
       - name: Build and push (arm64 + amd64)
         uses: docker/build-push-action@v7

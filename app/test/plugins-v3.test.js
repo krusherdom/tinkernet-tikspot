@@ -593,7 +593,7 @@ function discoverRecipe(overrides = {}) {
     params: { baseUrl: { label: 'Seed URL', type: 'text', default: 'http://seed.example.com' } },
     paramValues: { baseUrl: 'http://seed.example.com' },
     secretKeys: ['clientId'],
-    secrets: { clientId: '11281' },
+    secrets: { clientId: '10042' },
     auth: {
       method: 'POST',
       url: '{{param.baseUrl}}/authToken',
@@ -642,7 +642,7 @@ test('engine: auth.discover (plain-text body) overrides the param for the auth U
   const first = await runLookup({ recipe, inputs, now, http, tokenCache, diagnostics: true });
   assert.equal(first.ok, true, JSON.stringify(first));
   assert.deepEqual(log, [
-    'http://seed.example.com/clientUrl/11281',
+    'http://seed.example.com/clientUrl/10042',
     'https://real.example.com/authToken',
     'https://real.example.com/guests?room=101',
   ]);
@@ -660,7 +660,7 @@ test('engine: auth.discover (plain-text body) overrides the param for the auth U
   // Past tokenTtlSecs both are re-fetched.
   log.length = 0;
   await runLookup({ recipe, inputs, now: now + 86_400_000 + 1, http, tokenCache });
-  assert.equal(log[0], 'http://seed.example.com/clientUrl/11281');
+  assert.equal(log[0], 'http://seed.example.com/clientUrl/10042');
 });
 
 test('engine: auth.discover with a JSON path, and a JSON-encoded string body', async () => {

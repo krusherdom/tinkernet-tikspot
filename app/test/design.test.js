@@ -287,3 +287,47 @@ test('a block with style.hidden is skipped on the live page but kept (dimmed) in
   assert.match(preview, /data-hidden="1"/);
   assert.match(preview, /secret/);
 });
+
+// ---------------------------------------------------------------------------
+// 0.16.2 — portal layout + error placement
+// ---------------------------------------------------------------------------
+
+function lookupDesign() {
+  const d = defaultDesign();
+  d.blocks = [
+    { id: 'h', type: 'heading', props: { text: 'Welcome' } },
+    { id: 'pl', type: 'plugin-login', props: { label: 'Continue', pluginId: '3' } },
+  ];
+  return d;
+}
+const LOOKUP_PLUGINS = { 3: { id: 3, name: 'Hotel', enabled: true, inputs: [{ name: 'room', label: 'Room number', type: 'text', required: true }] } };
+
+test('portal page no longer sets an inline min-height (CSS owns the 100vh/100dvh pair) and the card self-centres', () => {
+  const html = renderPortalPage(defaultDesign(), { linkLogin: 'http://router/login' });
+  const pageTag = html.match(/<div class="cp-page" style="([^"]*)"/)[1];
+  assert.ok(!/min-height/.test(pageTag), 'inline min-height should be gone');
+  assert.match(html, /\.cp-page \{[^}]*min-height: 100vh;[^}]*min-height: 100dvh;[^}]*align-items: flex-start;/);
+  assert.match(html, /\.cp-card \{\s*margin: auto;/);
+});
+
+test('a lookup error renders once, inside the lookup form of the plugin that failed', () => {
+  const html = renderPortalPage(lookupDesign(), { plugins: LOOKUP_PLUGINS, linkLogin: 'http://router/login', error: 'No booking found', errorPluginId: 3 });
+  assert.equal(html.split('id="tk-error"').length - 1, 1, 'exactly one error banner');
+  const form = html.match(/<form class="cp-form"[^>]*data-tikspot-lookup>[\s\S]*?<\/form>/)[0];
+  assert.match(form, /id="tk-error"[^>]*>No booking found</);
+  assert.ok(form.indexOf('tk-error') < form.indexOf('name="in_room"'), 'error sits above the inputs');
+});
+
+test('an error with no owning block (router error, or plugin block not on the page) renders at the top of the card', () => {
+  const routerErr = renderPortalPage(lookupDesign(), { plugins: LOOKUP_PLUGINS, linkLogin: 'http://router/login', error: 'invalid username or password' });
+  assert.equal(routerErr.split('id="tk-error"').length - 1, 1);
+  assert.ok(routerErr.indexOf('tk-error') < routerErr.indexOf('data-tikspot-lookup'), 'banner precedes the form');
+  const otherPlugin = renderPortalPage(lookupDesign(), { plugins: LOOKUP_PLUGINS, error: 'Guest system unavailable', errorPluginId: 99 });
+  assert.equal(otherPlugin.split('id="tk-error"').length - 1, 1);
+  assert.ok(otherPlugin.indexOf('tk-error') < otherPlugin.indexOf('data-tikspot-lookup'));
+});
+
+test('no error -> no error banner element, so the page never scrolls on a clean load', () => {
+  const html = renderPortalPage(lookupDesign(), { plugins: LOOKUP_PLUGINS, linkLogin: 'http://router/login' });
+  assert.ok(!html.includes('id="tk-error"'));
+});

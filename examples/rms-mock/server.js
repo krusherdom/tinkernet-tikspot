@@ -40,10 +40,10 @@ function loadJson(file, fallback) {
 const config = loadJson(CONFIG_PATH, {
   agentId: 1000,
   agentPassword: 'agent-secret',
-  clientId: 11281,
+  clientId: 10042,
   clientPassword: 'webservice-secret',
-  rmsClientId: 11281,
-  allowedProperties: [{ clientId: 11281, clientName: 'Tikspot Demo Resort' }],
+  rmsClientId: 10042,
+  allowedProperties: [{ clientId: 10042, clientName: 'Tikspot Demo Resort' }],
 });
 
 // "YYYY-MM-DD HH:MM:SS" in UTC, matching RMS's date format and the recipes'

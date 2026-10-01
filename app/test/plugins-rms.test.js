@@ -43,7 +43,7 @@ const PLUGINS_DIR = path.join(REPO_ROOT, 'plugins');
 const GOOD_SECRETS = {
   agentId: '1000',
   agentPassword: 'agent-secret',
-  clientId: '11281',
+  clientId: '10042',
   clientPassword: 'webservice-secret',
 };
 
