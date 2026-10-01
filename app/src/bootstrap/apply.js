@@ -153,6 +153,13 @@ export function applySettings(db, spec, applied = []) {
   seedSetting(db, 'login_method', spec.loginMethod, m, applied);
   // Stored like the Settings registry stores it: a JSON array.
   seedSetting(db, 'hotspot_profiles', spec.hotspotProfiles?.length ? JSON.stringify(spec.hotspotProfiles) : null, m, applied);
+  // "*": explicitly clear a stored filter back to "every profile" (an empty array is
+  // read as "all" by setup.js). Applied in both modes — it is an explicit instruction,
+  // and nothing in the UI could have set a competing value.
+  if (spec.hotspotProfilesAll) {
+    const cur = getSetting(db, 'hotspot_profiles', null);
+    if (cur && cur !== '[]') { setSetting(db, 'hotspot_profiles', '[]'); applied.push('hotspot_profiles'); }
+  }
   return applied;
 }
 

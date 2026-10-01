@@ -21,7 +21,7 @@ import { verifyPassword, hashPassword } from '../src/admin/auth.js';
 import { ensureDefaultDesign, getActiveDesign, designModel, draftModel, saveDraft } from '../src/portal/designs.js';
 import { getPlugin, getPluginPublic, listPlugins, createPlugin } from '../src/plugins/store.js';
 import { readBootstrapEnv, redact } from '../src/bootstrap/env.js';
-import { applyBootstrap, maybeRestoreFromFile, attachPluginToActiveDesign } from '../src/bootstrap/apply.js';
+import { applyBootstrap, applySettings, maybeRestoreFromFile, attachPluginToActiveDesign } from '../src/bootstrap/apply.js';
 import { startRouterBootstrap, SIG_KEY } from '../src/bootstrap/router.js';
 import { readBootstrapStatus } from '../src/bootstrap/status.js';
 import { promoteStagedRestore } from '../src/admin/backup.js';
@@ -441,6 +441,14 @@ function memRouter(initial = {}) {
   const menus = JSON.parse(JSON.stringify(initial));
   let seq = 100;
   const calls = [];
+  // Real RouterOS has no `comment` on these menus and answers 400 "unknown parameter
+  // comment" (seen on 7.23.1) — mirror that so a regression is caught here, not on a router.
+  const NO_COMMENT = ['/ip/hotspot', '/ip/hotspot/profile'];
+  const rejectComment = (menu, obj) => {
+    if (NO_COMMENT.includes(menu) && obj && 'comment' in obj) {
+      throw Object.assign(new Error(`RouterOS ${menu}: Bad Request — unknown parameter comment`), { status: 400 });
+    }
+  };
   return {
     menus,
     calls,
@@ -450,12 +458,14 @@ function memRouter(initial = {}) {
     },
     add: async (menu, obj) => {
       calls.push(['PUT', menu, obj]);
+      rejectComment(menu, obj);
       const row = { '.id': `*${seq++}`, ...obj };
       (menus[menu] ||= []).push(row);
       return row;
     },
     patch: async (menu, id, obj) => {
       calls.push(['PATCH', menu, id, obj]);
+      rejectComment(menu, obj);
       const row = (menus[menu] || []).find((r) => r['.id'] === id);
       if (!row) throw Object.assign(new Error('no such item'), { status: 404 });
       Object.assign(row, obj);
@@ -512,15 +522,16 @@ test('ensureHotspotServer: adds a server named after the host, or patches the on
   const srv = r.menus['/ip/hotspot'][0];
   assert.deepEqual(
     { name: srv.name, interface: srv.interface, profile: srv.profile, disabled: srv.disabled, comment: srv.comment },
-    { name: 'hotspot.tikspot', interface: 'bridge-hs', profile: 'tikspot', disabled: 'no', comment: MANAGED_COMMENT },
+    { name: 'hotspot.tikspot', interface: 'bridge-hs', profile: 'tikspot', disabled: 'no', comment: undefined },
   );
 
-  const r2 = memRouter({ ...baseMenus(), '/ip/hotspot': [{ '.id': '*h1', name: 'hotspot1', interface: 'bridge-hs', profile: 'hsprof1', comment: 'ops' }] });
+  const r2 = memRouter({ ...baseMenus(), '/ip/hotspot': [{ '.id': '*h1', name: 'hotspot1', interface: 'bridge-hs', profile: 'hsprof1' }] });
   const b = await ensureHotspotServer(r2, { name: 'hotspot.tikspot', interface: 'bridge-hs', profile: 'tikspot' });
   assert.equal(b.updated, 'hotspot.tikspot');
   assert.equal(r2.menus['/ip/hotspot'].length, 1);
   assert.equal(r2.menus['/ip/hotspot'][0].name, 'hotspot.tikspot');
-  assert.equal(r2.menus['/ip/hotspot'][0].comment, `ops | ${MANAGED_COMMENT}`);
+  assert.equal(r2.menus['/ip/hotspot'][0].profile, 'tikspot');
+  assert.equal(r2.menus['/ip/hotspot'][0].comment, undefined, '/ip/hotspot has no comment field');
 });
 
 test('ensureDhcpDns: fills an empty dns-server, keeps a set one, skips when no network', async () => {
@@ -699,4 +710,18 @@ test('router bootstrap: URL plugin is fetched via the catalog helper and attache
   assert.equal(getPluginPublic(db, p.id).enabled, false);
   assert.ok(loginBlocks(db).some((b) => b.type === 'plugin-login' && b.props.pluginId === String(p.id)));
   assert.deepEqual(readBootstrapStatus(db).plugin, { name: p.name, id: p.id });
+});
+
+test('TIKSPOT_HOTSPOT_PROFILES="*" clears a stored profile filter back to "all profiles"', () => {
+  const db = new Database(':memory:');
+  migrate(db);
+  applySettings(db, readBootstrapEnv({ TIKSPOT_HOTSPOT_PROFILES: 'guest, staff' }));
+  assert.equal(getSetting(db, 'hotspot_profiles', null), JSON.stringify(['guest', 'staff']));
+  const spec = readBootstrapEnv({ TIKSPOT_HOTSPOT_PROFILES: '*' });
+  assert.equal(spec.hotspotProfilesAll, true);
+  assert.equal(spec.hotspotProfiles, null);
+  const applied = applySettings(db, spec);
+  assert.deepEqual(applied, ['hotspot_profiles']);
+  assert.equal(getSetting(db, 'hotspot_profiles', null), '[]');
+  assert.deepEqual(applySettings(db, readBootstrapEnv({ TIKSPOT_HOTSPOT_PROFILES: 'all' })), [], 'already cleared -> nothing applied');
 });

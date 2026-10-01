@@ -366,10 +366,13 @@ export async function ensureHotspotServer(router, { name, interface: iface, prof
   const existing = r.rows.find((s) => s.interface === iface) || r.rows.find((s) => s.name === name);
   const body = { name, interface: iface, profile, disabled: 'no' };
   if (existing) {
-    await router.patch('/ip/hotspot', existing['.id'], { ...body, comment: mergeComment(existing.comment) });
+    // NOTE: like /ip/hotspot/profile, /ip/hotspot has NO comment field — RouterOS answers
+    // "unknown parameter comment" (confirmed on 7.23.1), so the server can't carry the
+    // managed marker; it is identified by interface + name instead.
+    await router.patch('/ip/hotspot', existing['.id'], body);
     return { updated: name, detail: `hotspot server ${name} on ${iface} (profile ${profile})` };
   }
-  await router.add('/ip/hotspot', { ...body, comment: MANAGED_COMMENT });
+  await router.add('/ip/hotspot', body);
   return { created: name, detail: `hotspot server ${name} on ${iface} (profile ${profile})` };
 }
 

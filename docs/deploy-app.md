@@ -121,7 +121,7 @@ RouterOS `secrets:` mounted under `/run/secrets/`).
 | `TIKSPOT_NAS_SECRET` 🔑 | RADIUS shared secret. Unset = a unique random one is generated and synced to the router |
 | `TIKSPOT_PORTAL_TITLE` | Browser title of the portal page |
 | `TIKSPOT_LOGIN_METHOD` | `pap` (default) or `chap` |
-| `TIKSPOT_HOTSPOT_PROFILES` | Comma-separated hotspot profile names to manage (default: all) |
+| `TIKSPOT_HOTSPOT_PROFILES` | Comma-separated hotspot profile names to manage (default: all). `*` clears a previously stored list back to "all" |
 | `TIKSPOT_AUTOCONFIGURE` | `1` = configure the router once per set of inputs; `always` = every boot; unset/`0` = never (use **Router setup → Auto-configure** instead) |
 | `TIKSPOT_HOTSPOT_INTERFACE` | Guest bridge/interface. When set, auto-configure also creates the hotspot **profile** and **server** on it and fills an empty DHCP `dns-server` |
 | `TIKSPOT_HOTSPOT_PROFILE_NAME` | Name of the profile it creates (default `tikspot`) |

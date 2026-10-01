@@ -152,7 +152,11 @@ export function readBootstrapEnv(env = process.env, { readFile = defaultReadFile
   const portalTitle = r.plain(P('PORTAL_TITLE'));
   const loginMethod = parseEnum(P('LOGIN_METHOD'), r.plain(P('LOGIN_METHOD')), ['pap', 'chap'], warnings);
   const profilesRaw = r.plain(P('HOTSPOT_PROFILES'));
-  const hotspotProfiles = profilesRaw
+  // "*" (or "all") means "manage every profile" — it CLEARS a previously stored filter.
+  // Needed because a seeded filter otherwise has no way back to "all" (there is no UI
+  // for it), e.g. after the named profile has been deleted on the router.
+  const hotspotProfilesAll = profilesRaw ? ['*', 'all'].includes(profilesRaw.trim().toLowerCase()) : false;
+  const hotspotProfiles = profilesRaw && !hotspotProfilesAll
     ? profilesRaw.split(',').map((s) => s.trim()).filter(Boolean)
     : null;
 
@@ -209,6 +213,7 @@ export function readBootstrapEnv(env = process.env, { readFile = defaultReadFile
     portalTitle,
     loginMethod,
     hotspotProfiles,
+    hotspotProfilesAll,
     autoconfigure,
     hotspot,
     plugin,
@@ -238,7 +243,7 @@ export function hasBootstrap(spec) {
   return Boolean(
     spec.admin.password || spec.setupComplete != null || spec.router.host || spec.router.user ||
       spec.router.password || spec.router.scheme || spec.containerIp || spec.serverName || spec.nasSecret ||
-      spec.portalTitle || spec.loginMethod || spec.hotspotProfiles || spec.autoconfigure || spec.hotspot ||
+      spec.portalTitle || spec.loginMethod || spec.hotspotProfiles || spec.hotspotProfilesAll || spec.autoconfigure || spec.hotspot ||
       spec.plugin || spec.restore || spec.warnings.length,
   );
 }
