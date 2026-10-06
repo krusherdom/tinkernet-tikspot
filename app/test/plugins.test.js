@@ -487,7 +487,8 @@ test('runLookup: no-match', async () => {
     http,
     tokenCache: makeTokenCache(),
   });
-  assert.deepEqual(result, { ok: false, reason: 'no-match' });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'no-match');
 });
 
 test('runLookup: outside-window', async () => {
@@ -670,7 +671,8 @@ for (const recipeName of ['hotel-json', 'hotel-xml', 'hotel-regex']) {
       http: httpRequest,
       tokenCache: makeTokenCache(),
     });
-    assert.deepEqual(result, { ok: false, reason: 'no-match' });
+    assert.equal(result.ok, false);
+  assert.equal(result.reason, 'no-match');
   });
 }
 

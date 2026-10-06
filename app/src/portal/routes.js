@@ -56,6 +56,96 @@ function readContext(req) {
   };
 }
 
+// ---- lookup attempt logging -------------------------------------------------
+// One event per attempt, worded so the Events table alone answers "what did
+// they type and why was it refused?" without expanding the detail row.
+
+function typedInputs(inputs) {
+  return Object.fromEntries(inputs.map((i) => [i.name, String(i.value ?? '').trim().slice(0, 80)]));
+}
+
+function typedSummary(typed) {
+  const parts = Object.entries(typed).map(([k, v]) => `${k} ${v || '(blank)'}`);
+  return parts.length ? parts.join(' / ') : '(no inputs)';
+}
+
+const shortDate = (v) => (v == null || v === '' ? '?' : String(v).replace('T', ' ').slice(0, 16));
+
+export function describeOutcome(result, typed, pluginName) {
+  const who = typedSummary(typed);
+  const tail = ` (plugin ${pluginName})`;
+  if (result.ok) {
+    return { level: 'info', message: `Lookup OK: ${who} → ${result.guest?.label || 'guest'}${tail}` };
+  }
+  const n = result.candidates;
+  let why;
+  let level = 'info';
+  switch (result.reason) {
+    case 'no-match':
+      if (result.detail === 'no-candidates' || n === 0) why = 'no booking found (search returned 0 records)';
+      else if (typeof result.detail === 'string' && result.detail.startsWith('step:')) why = `no booking found (${result.detail} returned nothing)`;
+      else why = `details did not match any of ${n != null ? n : 'the'} records`;
+      break;
+    case 'outside-window': {
+      const w = result.window || {};
+      const when = result.detail === 'missing-dates' ? 'stay dates missing on the record' : `${result.detail}; ${shortDate(w.start)} → ${shortDate(w.end)}`;
+      why = `found, but outside the stay window (${when})`;
+      break;
+    }
+    case 'timeout':
+      level = 'warn';
+      why = 'guest system timed out';
+      break;
+    default:
+      level = 'warn';
+      why = result.status ? `guest system error (HTTP ${result.status})` : `guest system error${result.detail ? ` (${result.detail})` : ''}`;
+  }
+  return { level, message: `Lookup refused: ${who} — ${why}${tail}` };
+}
+
+function lookupDetail(result, typed, plugin, mac) {
+  const d = {
+    plugin,
+    inputs: typed,
+    mac,
+    outcome: result.ok ? 'ok' : result.reason,
+    detail: result.ok ? undefined : result.detail,
+    candidates: result.candidates,
+    window: result.window,
+    status: result.status,
+    steps: Array.isArray(result.steps) ? result.steps.map((s) => `${s.name}:${s.status}:${s.records}`).join(' ') : undefined,
+    clockSkewSecs: result.clockSkewSecs,
+    label: result.ok ? result.guest?.label : undefined,
+  };
+  for (const k of Object.keys(d)) if (d[k] === undefined) delete d[k];
+  return d;
+}
+
+// A guest system whose `Date` header disagrees with our clock by more than a
+// few minutes means every date filter and stay window this container computes
+// is wrong; the symptom is "no booking found (search returned 0 records)" for
+// guests who are demonstrably checked in. Warn once an hour, not per attempt.
+const CLOCK_SKEW_WARN_SECS = 300;
+const CLOCK_WARN_INTERVAL_MS = 60 * 60 * 1000;
+let lastClockWarnAt = 0;
+export function warnOnClockSkew(db, skewSecs, source, nowMs = Date.now()) {
+  if (skewSecs == null || Math.abs(skewSecs) < CLOCK_SKEW_WARN_SECS) return false;
+  if (nowMs - lastClockWarnAt < CLOCK_WARN_INTERVAL_MS) return false;
+  lastClockWarnAt = nowMs;
+  const mins = Math.round(Math.abs(skewSecs) / 60);
+  logEvent(db, 'warn', 'clock', `Container clock is ${mins} min ${skewSecs > 0 ? 'behind' : 'ahead of'} the guest system (${source})`, {
+    clockSkewSecs: skewSecs,
+    hint:
+      'The container takes its time from the router. Check /system/clock and /system/ntp/client on the MikroTik — ' +
+      'NTP status "waiting" means it has never synced (UDP 123 or DNS blocked). Until it is right, date-based lookup ' +
+      'filters and stay windows are computed from the wrong time and checked-in guests are refused.',
+  });
+  return true;
+}
+export function _resetClockWarn() {
+  lastClockWarnAt = 0;
+}
+
 function loginMethod(db) {
   const row = db.prepare("SELECT value FROM settings WHERE key = 'login_method'").get();
   return row?.value ?? 'pap';
@@ -135,6 +225,13 @@ export default async function portalRoutes(app) {
     }));
     const missingRequired = inputs.some((i) => i.required && !String(i.value ?? '').trim());
     if (missingRequired) {
+      const blank = typedInputs(inputs);
+      logEvent(db, 'info', 'plugin', `Lookup refused: ${typedSummary(blank)} — a required field was left blank (plugin ${recipe.name})`, {
+        plugin: id,
+        inputs: blank,
+        mac: ctx.mac,
+        outcome: 'missing-required',
+      });
       return renderError('Please fill in all the required fields.');
     }
 
@@ -143,26 +240,32 @@ export default async function portalRoutes(app) {
     // admin's Guest list card — see app/src/admin/plugins.js).
     const records = recipe.source === 'list' ? listRows(db, id).rows : undefined;
 
+    // Every attempt is logged with WHAT was typed and WHY it was accepted or
+    // refused (see describeOutcome). The typed values are guest identifiers
+    // the operator is entitled to see (room, surname…), not credentials, and
+    // the event log is admin-only. Diagnostics adds per-step record counts
+    // and the clock-skew probe — never response bodies.
+    const typed = typedInputs(inputs);
     let result;
     try {
-      result = await runLookup({ recipe, inputs, tokenCache: lookupTokenCache, records });
+      result = await runLookup({ recipe, inputs, tokenCache: lookupTokenCache, records, diagnostics: true });
     } catch (err) {
-      logEvent(db, 'error', 'plugin', `Lookup threw for plugin ${recipe.name}`, {
+      logEvent(db, 'error', 'plugin', `Lookup failed: ${typedSummary(typed)} — guest system threw (plugin ${recipe.name})`, {
         plugin: id,
+        inputs: typed,
+        mac: ctx.mac,
         error: String(err?.message || err),
       });
       return renderError(recipe.messages?.upstream || 'The guest system is not responding — please try again or ask at reception.');
     }
 
+    // Refusals are logged here; a success is logged once, below, after the
+    // grant (so one attempt = one event, and the event carries the expiry).
+    warnOnClockSkew(db, result.clockSkewSecs, recipe.name);
     if (!result.ok) {
+      const outcome = describeOutcome(result, typed, recipe.name);
+      logEvent(db, outcome.level, 'plugin', outcome.message, lookupDetail(result, typed, id, ctx.mac));
       const key = result.reason === 'no-match' ? 'noMatch' : result.reason === 'outside-window' ? 'outsideWindow' : 'upstream';
-      const level = result.reason === 'upstream' || result.reason === 'timeout' ? 'warn' : 'info';
-      logEvent(db, level, 'plugin', `Lookup ${result.reason} for plugin ${recipe.name}`, {
-        plugin: id,
-        reason: result.reason,
-        status: result.status,
-        mac: ctx.mac,
-      });
       return renderError(recipe.messages?.[key] || 'We could not find a booking with those details.');
     }
 
@@ -174,10 +277,8 @@ export default async function portalRoutes(app) {
       ip: ctx.ip,
       inputs,
     });
-    logEvent(db, 'info', 'plugin', 'Guest admitted', {
-      plugin: id,
-      mac: ctx.mac,
-      label: result.guest.label,
+    logEvent(db, 'info', 'plugin', `${describeOutcome(result, typed, recipe.name).message.replace(/ \(plugin /, `, admitted until ${grant.expiresAt} (plugin `)}`, {
+      ...lookupDetail(result, typed, id, ctx.mac),
       expiresAt: grant.expiresAt,
     });
 

@@ -112,7 +112,8 @@ test('CSV guest list: same room, wrong surname -> no-match (two guests share roo
     http: httpRequest,
     tokenCache: makeTokenCache(),
   });
-  assert.deepEqual(result, { ok: false, reason: 'no-match' });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'no-match');
 });
 
 test('CSV guest list: stay already ended -> outside-window', async () => {

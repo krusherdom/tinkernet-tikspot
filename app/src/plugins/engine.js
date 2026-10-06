@@ -415,6 +415,39 @@ function withSteps(result, diagnostics, stepDiag) {
   return { ...result, steps: stepDiag };
 }
 
+// The last two checks of every lookup, shared by the list and HTTP paths.
+// The result says WHICH kind of refusal this was so the portal's event log
+// can tell "wrong surname" (records came back, none matched) from "the
+// search found nothing" (a filter / clock problem) from "found, but the stay
+// isn't active" — the three look identical to the guest.
+//   no-match       detail: 'no-candidates' | 'no-record-matched', candidates
+//   outside-window detail: not-started|ended|missing-dates, candidates, window
+//   ok             candidates
+function decide(recipe, records, inputs, nowMs, boundParseDate) {
+  const candidates = records.length;
+  const guestRecord = findGuest(recipe.match, records, inputs);
+  if (!guestRecord) {
+    return { ok: false, reason: 'no-match', detail: candidates ? 'no-record-matched' : 'no-candidates', candidates };
+  }
+  const win = inWindow(recipe.window, guestRecord, nowMs, boundParseDate);
+  if (!win.ok) {
+    const w = recipe.window || {};
+    return {
+      ok: false,
+      reason: 'outside-window',
+      detail: win.reason,
+      candidates,
+      window: {
+        start: w.start ? guestRecord[w.start] ?? null : null,
+        end: w.end ? guestRecord[w.end] ?? null : null,
+        leewayHours: w.leewayHours != null ? w.leewayHours : 24,
+        now: new Date(nowMs).toISOString(),
+      },
+    };
+  }
+  return { ok: true, guest: { label: guestLabel(guestRecord), record: guestRecord }, expiresAt: win.expiresAt, candidates };
+}
+
 // steps[].extra: { fieldName: template } — rendered ONCE per step (not per
 // record, so `record.*` isn't in scope — only `input`/`secret`/`param`/
 // `now`/`steps`/`token`) and stamped onto every record that step produced,
@@ -483,30 +516,44 @@ export async function runLookup({ recipe, inputs = [], now, http = defaultHttpRe
     const candidateRecords = mapped.slice(0, cap);
     const stepDiag = [{ name: 'list', status: 'ok', ms: Date.now() - t0, records: candidateRecords.length }];
 
-    const guestRecord = findGuest(recipe.match, candidateRecords, inputs);
-    if (!guestRecord) return withSteps({ ok: false, reason: 'no-match' }, diagnostics, stepDiag);
-
     const boundParseDate = (v) => parseDate(v, recipe.parse && recipe.parse.dateFormat);
-    const win = inWindow(recipe.window, guestRecord, nowMsList, boundParseDate);
-    if (!win.ok) return withSteps({ ok: false, reason: 'outside-window', detail: win.reason }, diagnostics, stepDiag);
-
-    return withSteps(
-      { ok: true, guest: { label: guestLabel(guestRecord), record: guestRecord }, expiresAt: win.expiresAt },
-      diagnostics,
-      stepDiag,
-    );
+    return withSteps(decide(recipe, candidateRecords, inputs, nowMsList, boundParseDate), diagnostics, stepDiag);
   }
 
   return runHttpLookup({ recipe, inputs, now, http, tokenCache, diagnostics });
 }
 
-async function runHttpLookup({ recipe, inputs = [], now, http = defaultHttpRequest, tokenCache, diagnostics = false } = {}) {
+async function runHttpLookup({ recipe, inputs = [], now, http: rawHttp = defaultHttpRequest, tokenCache, diagnostics = false } = {}) {
   const nowMs = now ?? Date.now();
   const nowIso = new Date(nowMs).toISOString();
 
+  // Clock-skew probe. Recipes build their date filters ({{date:..}}) and the
+  // stay window from OUR clock, while the guest system answers in ITS time.
+  // A container on a router whose clock has drifted (seen live: 21 h behind,
+  // NTP never synced) silently filters every current stay out and the guest
+  // just sees "no booking found". The first response that carries a `Date`
+  // header gives us the remote clock; the difference is reported as
+  // `clockSkewSecs` (positive = we are behind) when diagnostics are on, so
+  // the portal route can raise a warning the operator can act on.
+  const skew = { ms: null };
+  const http = async (req) => {
+    const res = await rawHttp(req);
+    if (skew.ms == null && res && res.headers) {
+      const hdr = res.headers.date ?? res.headers.Date;
+      const t = hdr ? Date.parse(hdr) : NaN;
+      if (Number.isFinite(t)) skew.ms = t - Date.now();
+    }
+    return res;
+  };
+  const stepDiag = [];
+  const done = (result) => {
+    const out = withSteps(result, diagnostics, stepDiag);
+    if (diagnostics && skew.ms != null) out.clockSkewSecs = Math.round(skew.ms / 1000);
+    return out;
+  };
+
   let token = '';
   let tokenFromCache = false;
-  const stepDiag = [];
   if (recipe.auth) {
     try {
       const t0 = Date.now();
@@ -519,7 +566,7 @@ async function runHttpLookup({ recipe, inputs = [], now, http = defaultHttpReque
       token = res.token;
       tokenFromCache = res.fromCache;
     } catch (e) {
-      return withSteps({ ok: false, reason: reasonForError(e) }, diagnostics, stepDiag);
+      return done({ ok: false, reason: reasonForError(e) });
     }
   }
 
@@ -596,7 +643,7 @@ async function runHttpLookup({ recipe, inputs = [], now, http = defaultHttpReque
         } catch (e) {
           if (e && e.code === 'REQUEST_CAP') {
             stepDiag.push({ name: step.name, status: 'error', ms: Date.now() - t0, records: parents.length });
-            return withSteps({ ok: false, reason: 'upstream', detail: 'request-cap' }, diagnostics, stepDiag);
+            return done({ ok: false, reason: 'upstream', detail: 'request-cap' });
           }
           if (step.optional) continue; // ignore this record's enrichment failure, try the next
           failure = e;
@@ -607,19 +654,19 @@ async function runHttpLookup({ recipe, inputs = [], now, http = defaultHttpReque
       if (failure) {
         stepDiag.push({ name: step.name, status: 'error', ms: Date.now() - t0, records: parents.length });
         if (failure.code === 'STEP_HTTP') {
-          return withSteps({ ok: false, reason: 'upstream', status: failure.status }, diagnostics, stepDiag);
+          return done({ ok: false, reason: 'upstream', status: failure.status });
         }
         if (failure.code === 'STEP_PARSE') {
-          return withSteps({ ok: false, reason: 'upstream' }, diagnostics, stepDiag);
+          return done({ ok: false, reason: 'upstream' });
         }
-        return withSteps({ ok: false, reason: reasonForError(failure) }, diagnostics, stepDiag);
+        return done({ ok: false, reason: reasonForError(failure) });
       }
 
       stepResults[step.name] = { records: parents };
       applyStepExtra(recipe, step, inputs, token, nowIso, stepResults);
       stepDiag.push({ name: step.name, status: 'ok', ms: Date.now() - t0, records: parents.length });
       if (step.requireRecords && parents.length === 0) {
-        return withSteps({ ok: false, reason: 'no-match', detail: `step:${step.name}` }, diagnostics, stepDiag);
+        return done({ ok: false, reason: 'no-match', detail: `step:${step.name}` });
       }
     } else {
       try {
@@ -695,12 +742,12 @@ async function runHttpLookup({ recipe, inputs = [], now, http = defaultHttpReque
           ...(step.paginate ? { pages } : {}),
         });
         if (step.requireRecords && allRecords.length === 0) {
-          return withSteps({ ok: false, reason: 'no-match', detail: `step:${step.name}` }, diagnostics, stepDiag);
+          return done({ ok: false, reason: 'no-match', detail: `step:${step.name}` });
         }
       } catch (e) {
         if (e && e.code === 'REQUEST_CAP') {
           stepDiag.push({ name: step.name, status: 'error', ms: Date.now() - t0, records: 0 });
-          return withSteps({ ok: false, reason: 'upstream', detail: 'request-cap' }, diagnostics, stepDiag);
+          return done({ ok: false, reason: 'upstream', detail: 'request-cap' });
         }
         if (step.optional) {
           stepResults[step.name] = { records: [] };
@@ -711,12 +758,12 @@ async function runHttpLookup({ recipe, inputs = [], now, http = defaultHttpReque
         }
         stepDiag.push({ name: step.name, status: 'error', ms: Date.now() - t0, records: 0 });
         if (e.code === 'STEP_HTTP') {
-          return withSteps({ ok: false, reason: 'upstream', status: e.status }, diagnostics, stepDiag);
+          return done({ ok: false, reason: 'upstream', status: e.status });
         }
         if (e.code === 'STEP_PARSE') {
-          return withSteps({ ok: false, reason: 'upstream' }, diagnostics, stepDiag);
+          return done({ ok: false, reason: 'upstream' });
         }
-        return withSteps({ ok: false, reason: reasonForError(e) }, diagnostics, stepDiag);
+        return done({ ok: false, reason: reasonForError(e) });
       }
     }
   }
@@ -724,20 +771,6 @@ async function runHttpLookup({ recipe, inputs = [], now, http = defaultHttpReque
   const cap = recipe.maxRecords ?? 200;
   const records = candidateRecords.slice(0, cap);
 
-  const guestRecord = findGuest(recipe.match, records, inputs);
-  if (!guestRecord) return withSteps({ ok: false, reason: 'no-match' }, diagnostics, stepDiag);
-
   const boundParseDate = (v) => parseDate(v, lastParse && lastParse.dateFormat);
-  const win = inWindow(recipe.window, guestRecord, nowMs, boundParseDate);
-  if (!win.ok) return withSteps({ ok: false, reason: 'outside-window', detail: win.reason }, diagnostics, stepDiag);
-
-  return withSteps(
-    {
-      ok: true,
-      guest: { label: guestLabel(guestRecord), record: guestRecord },
-      expiresAt: win.expiresAt,
-    },
-    diagnostics,
-    stepDiag,
-  );
+  return done(decide(recipe, records, inputs, nowMs, boundParseDate));
 }

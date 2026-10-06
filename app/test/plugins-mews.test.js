@@ -111,7 +111,8 @@ test('Mews Connector: room only -> no-match (minRules requires a second matching
     http: httpRequest,
     tokenCache: makeTokenCache(),
   });
-  assert.deepEqual(result, { ok: false, reason: 'no-match' });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'no-match');
 });
 
 test('Mews Connector: bad tokens -> upstream (mock returns Mews\'s own 401 { Message } envelope)', async () => {

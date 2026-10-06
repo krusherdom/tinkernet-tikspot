@@ -107,7 +107,8 @@ test('Apaleo: room only -> no-match (minRules requires a second matching detail)
     http: httpRequest,
     tokenCache: makeTokenCache(),
   });
-  assert.deepEqual(result, { ok: false, reason: 'no-match' });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'no-match');
 });
 
 test('Apaleo: CheckedOut reservation -> no-match (outside the InHouse/Confirmed status filter, so the API never returns it)', async () => {
@@ -119,7 +120,8 @@ test('Apaleo: CheckedOut reservation -> no-match (outside the InHouse/Confirmed 
     http: httpRequest,
     tokenCache: makeTokenCache(),
   });
-  assert.deepEqual(result, { ok: false, reason: 'no-match' });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'no-match');
 });
 
 test('Apaleo: still-Confirmed reservation whose stay ended 26h ago -> outside-window', async () => {

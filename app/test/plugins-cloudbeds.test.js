@@ -112,7 +112,8 @@ test('Cloudbeds: confirmed-but-not-checked-in guest -> no-match (status=checked_
     http: httpRequest,
     tokenCache: makeTokenCache(),
   });
-  assert.deepEqual(result, { ok: false, reason: 'no-match' });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'no-match');
 });
 
 test('Cloudbeds: room only -> no-match (minRules requires a second matching detail)', async () => {
@@ -124,7 +125,8 @@ test('Cloudbeds: room only -> no-match (minRules requires a second matching deta
     http: httpRequest,
     tokenCache: makeTokenCache(),
   });
-  assert.deepEqual(result, { ok: false, reason: 'no-match' });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'no-match');
 });
 
 test('Cloudbeds: wrong API key -> upstream (mock returns Cloudbeds\' own { success:false, message } envelope)', async () => {

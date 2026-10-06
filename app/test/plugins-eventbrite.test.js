@@ -107,7 +107,8 @@ test('Eventbrite: wrong email -> no-match', async () => {
     http: httpRequest,
     tokenCache: makeTokenCache(),
   });
-  assert.deepEqual(result, { ok: false, reason: 'no-match' });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'no-match');
 });
 
 test("Eventbrite: bad token -> upstream (mock returns Eventbrite's own { status_code, error, error_description } envelope)", async () => {

@@ -111,6 +111,33 @@ page. Remember the container needs **outbound access** to your API — a masquer
 the container subnet on the router (Verify flags a missing one) and a reachable URL. The
 System tab's *egress check* can confirm this.
 
+## Reading the lookup log
+
+Every attempt a guest makes is recorded in **Logs → Events** (source `plugin`) as one line
+that says what was typed and what happened, for example:
+
+```
+Lookup OK: room 101 / name Smith → Jane Smith · room 101 (plugin RMS Cloud)
+Lookup refused: room 101 / name Smith — details did not match any of 3 records (plugin RMS Cloud)
+Lookup refused: room 101 / name Smith — no booking found (search returned 0 records) (plugin RMS Cloud)
+Lookup refused: room 101 / name Smith — found, but outside the stay window (ended; 2026-10-01 10:00 → 2026-10-03 10:00) (plugin RMS Cloud)
+Lookup refused: room 101 / name Smith — guest system error (HTTP 401) (plugin RMS Cloud)
+```
+
+The three refusals mean different things: *did not match any of N records* is a typo or a
+different surname on the booking; *search returned 0 records* means the guest system's own
+filters excluded everything, so the typed details were never compared — check the recipe's
+search filters and the router clock; *outside the stay window* means the booking was found
+but the dates (shown) are not current, allowing for the recipe's leeway. Click a row for the
+detail: the typed inputs, the client MAC, per-step record counts, the stay window used and
+`clockSkewSecs`.
+
+Lookups also compare the guest system's `Date` header with the container's clock. When they
+disagree by five minutes or more, a `clock` warning is logged (once an hour) and the plugin's
+**Test lookup** panel shows the skew in red. The container takes its time from the router, so
+fix `/system/clock` and `/system/ntp/client` on the MikroTik; until then every date-based
+filter and stay window is computed from the wrong time.
+
 ## Browsing the catalog
 
 ![Plugin catalog browser](img/admin-plugin-catalog.png)

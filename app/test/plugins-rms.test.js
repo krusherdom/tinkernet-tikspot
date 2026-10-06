@@ -152,7 +152,8 @@ test('RMS Cloud (surname + room): wrong surname -> no-match', async () => {
     http: httpRequest,
     tokenCache: makeTokenCache(),
   });
-  assert.deepEqual(result, { ok: false, reason: 'no-match' });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'no-match');
 });
 
 // The search body carries departFrom = now-1d / arriveTo = now+1d so a busy
@@ -168,7 +169,8 @@ test('RMS Cloud (surname + room): stay ended 3 days ago -> no-match (filtered se
     http: httpRequest,
     tokenCache: makeTokenCache(),
   });
-  assert.deepEqual(result, { ok: false, reason: 'no-match' });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'no-match');
 });
 
 test('RMS Cloud (surname + room): arrives in 10 days -> no-match (filtered server-side by arriveTo)', async () => {
@@ -180,7 +182,8 @@ test('RMS Cloud (surname + room): arrives in 10 days -> no-match (filtered serve
     http: httpRequest,
     tokenCache: makeTokenCache(),
   });
-  assert.deepEqual(result, { ok: false, reason: 'no-match' });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'no-match');
 });
 
 test('RMS Cloud (surname + room): bad secrets -> upstream', async () => {
@@ -315,5 +318,6 @@ test('RMS Cloud (any detail): room only -> no-match (minRules requires a second 
     http: httpRequest,
     tokenCache: makeTokenCache(),
   });
-  assert.deepEqual(result, { ok: false, reason: 'no-match' });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'no-match');
 });

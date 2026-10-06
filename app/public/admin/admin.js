@@ -561,7 +561,8 @@
           return row;
         }).join('') : '<tr><td colspan="4" class="empty">No events logged yet.</td></tr>';
         body.innerHTML =
-          '<p class="sub">Structured application events — warnings, errors and notable state changes.</p>' +
+          '<p class="sub">Structured application events — warnings, errors and notable state changes. ' +
+          'Every guest-lookup attempt is here under source <code>plugin</code>: what was typed and why it was accepted or refused. Click a row for the record counts, stay window and clock check.</p>' +
           '<div class="card"><div class="row">' +
           field('ev-level', 'Level', '<select id="ev-level"><option value="">all</option>' + levels.map(function (l) { return '<option value="' + esc(l) + '"' + (l === level ? ' selected' : '') + '>' + esc(l) + '</option>'; }).join('') + '</select>') +
           field('ev-source', 'Source', '<select id="ev-source"><option value="">all</option>' + sources.map(function (s) { return '<option value="' + esc(s) + '"' + (s === source ? ' selected' : '') + '>' + esc(s) + '</option>'; }).join('') + '</select>') +
@@ -1860,7 +1861,18 @@
         upstream: 'Guest system error', timeout: 'Timed out' };
       head = labels[r.reason] || ('Failed' + (r.reason ? ' (' + esc(r.reason) + ')' : ''));
       if (r.status) head += ' <span class="muted">HTTP ' + esc(String(r.status)) + '</span>';
-      if (r.detail) head += '<div class="muted tr-detail">' + esc(r.detail) + '</div>';
+      var detailText = r.detail === 'no-candidates' ? 'the search returned no records at all — the guest system filtered everything out (check its filters, and the clock below)'
+        : r.detail === 'no-record-matched' ? 'records came back, but none matched the typed details'
+        : r.detail;
+      if (detailText) head += '<div class="muted tr-detail">' + esc(detailText) + '</div>';
+    }
+    if (r.candidates != null) head += '<div class="muted tr-detail">' + r.candidates + ' candidate record' + (r.candidates === 1 ? '' : 's') + ' considered</div>';
+    if (r.clockSkewSecs != null) {
+      var skewMin = Math.round(Math.abs(r.clockSkewSecs) / 60);
+      var skewBad = Math.abs(r.clockSkewSecs) >= 300;
+      head += '<div class="' + (skewBad ? 'bad' : 'muted') + ' tr-detail">Container clock is ' +
+        (skewBad ? skewMin + ' min ' : 'within a minute ') + (skewBad ? (r.clockSkewSecs > 0 ? 'behind' : 'ahead of') + ' the guest system' : 'of the guest system') +
+        (skewBad ? ' — date filters and stay windows are computed from the wrong time; fix the router clock / NTP' : '') + '</div>';
     }
     var html = '<div class="test-result tr-' + cls + '"><div class="tr-head">' + head + '</div>' +
       '<div class="muted tr-ms">' + (r.ms != null ? r.ms + ' ms' : '') + '</div></div>';
