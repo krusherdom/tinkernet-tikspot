@@ -27,7 +27,7 @@
     tikspot:
       # Multi-arch public image (arm64 + amd64) published by the repo's release workflow.
       # Pin a release tag for production; RouterOS pulls the variant matching the router's CPU.
-      image: ghcr.io/krusherdom/tinkernet-tikspot:0.17.0
+      image: ghcr.io/krusherdom/tinkernet-tikspot:0.17.1
       container_name: tikspot
       hostname: tikspot
       restart: unless-stopped
