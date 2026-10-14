@@ -407,8 +407,8 @@ export default async function pluginRoutes(app) {
       if (result.notFound) return reply.code(404).send({ error: result.error });
       return reply.code(400).send({ error: result.error, fields: result.fields });
     }
-    logAudit(db, req, 'plugin.update', `#${id}`);
-    return { ok: true };
+    logAudit(db, req, 'plugin.update', `#${id}` + (result.movedGrants ? ` (moved ${result.movedGrants} active grants to ${req.body.planGroup})` : ''));
+    return { ok: true, movedGrants: result.movedGrants || 0 };
   });
 
   app.delete('/api/plugins/:id', async (req, reply) => {

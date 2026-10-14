@@ -189,7 +189,21 @@ export function updatePlugin(db, id, body) {
       if (!Object.prototype.hasOwnProperty.call(incoming, k)) delete merged[k];
     }
   }
-  return save(db, row.id, merged, existingSecrets);
+  const res = save(db, row.id, merged, existingSecrets);
+  // Changing the plan group must carry the guests this plugin has ALREADY
+  // admitted with it: their `pg-*` RADIUS users sit in radusergroup under the
+  // old group and would otherwise keep the old plan's limits until checkout.
+  // Running sessions keep what they started with; the next (re)login gets
+  // the new group's reply attributes.
+  if (res.ok && merged.planGroup && merged.planGroup !== existing.planGroup) {
+    res.movedGrants = db
+      .prepare(
+        `UPDATE radusergroup SET groupname = ?
+          WHERE username IN (SELECT username FROM plugin_grants WHERE plugin_id = ? AND active = 1)`,
+      )
+      .run(merged.planGroup, row.id).changes;
+  }
+  return res;
 }
 
 export function deletePlugin(db, id) {

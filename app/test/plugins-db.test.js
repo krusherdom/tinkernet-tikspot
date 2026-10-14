@@ -296,3 +296,19 @@ test('GET /portal/lookup/:id redirects to /login', async () => {
     await app.close();
   }
 });
+
+test('updatePlugin: changing planGroup moves active grants to the new RADIUS group', () => {
+  const db = freshDb();
+  const created = createPlugin(db, baseBody({ planGroup: 'free' }));
+  const plugin = getPlugin(db, created.id);
+  const g1 = grantGuest(db, { plugin, guest: { label: 'A' }, expiresAt: new Date(Date.now() + 3600e3).toISOString(), mac: '', ip: '', inputs: [] });
+  const g2 = grantGuest(db, { plugin, guest: { label: 'B' }, expiresAt: new Date(Date.now() + 3600e3).toISOString(), mac: '', ip: '', inputs: [] });
+  db.prepare('UPDATE plugin_grants SET active = 0 WHERE username = ?').run(g2.username);
+  const upd = updatePlugin(db, created.id, { planGroup: 'stay' });
+  assert.equal(upd.ok, true);
+  assert.equal(upd.movedGrants, 1);
+  const grp = (u) => db.prepare('SELECT groupname FROM radusergroup WHERE username = ?').get(u).groupname;
+  assert.equal(grp(g1.username), 'stay');
+  assert.equal(grp(g2.username), 'free', 'revoked/expired grants are left alone');
+  assert.equal(updatePlugin(db, created.id, { name: 'renamed' }).movedGrants, undefined);
+});
