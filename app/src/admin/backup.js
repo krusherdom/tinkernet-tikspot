@@ -51,7 +51,7 @@ export default async function backupRoutes(app) {
           // `settings`, so redact them here too.
           snap.exec("UPDATE plugins SET secrets_json = '{}'");
           if (configOnly) {
-            snap.exec('DELETE FROM radacct; DELETE FROM radpostauth; DELETE FROM events; DELETE FROM plugin_grants; VACUUM;');
+            snap.exec('DELETE FROM radacct; DELETE FROM radpostauth; DELETE FROM events; DELETE FROM plugin_grants; DELETE FROM user_devices; VACUUM;');
           }
         } finally {
           snap.close();

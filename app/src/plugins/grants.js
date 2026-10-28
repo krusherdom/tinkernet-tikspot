@@ -1,10 +1,14 @@
 // Guest-lookup RADIUS grants: mint a short-lived credential for a guest a
-// plugin (recipe) just admitted, and sweep expired ones. Mirrors the
-// mac_sessions pattern in mac/grants.js — mint via radius/sync.js's syncUser,
-// track expires_at ourselves, sweeper calls removeUser.
+// plugin (recipe) just admitted, and sweep expired ones. Mint via
+// radius/sync.js's syncUser, track expires_at ourselves (SQLite
+// 'YYYY-MM-DD HH:MM:SS' UTC; pre-0.18 rows hold ISO strings, so every
+// comparison goes through datetime()), sweeper calls removeUser. When the guest
+// arrives with a MAC on a mac_remember plan the device is remembered against
+// the pg-* user (mac/devices.js) and forgotten with the grant.
 
 import { randomInt } from 'node:crypto';
 import { syncUser, removeUser } from '../radius/sync.js';
+import { recordDevice, deviceExpiry, forgetUserDevices, normMac } from '../mac/devices.js';
 
 const DEFAULT_MAX_GRANT_HOURS = 168;
 const HOUR_MS = 3600 * 1000;
@@ -45,8 +49,10 @@ export function grantGuest(db, { plugin, guest, expiresAt, mac, ip, inputs } = {
   const engineExpiresMs = expiresAt ? Date.parse(expiresAt) : cap;
   const finalExpiresMs = Number.isFinite(engineExpiresMs) ? Math.min(engineExpiresMs, cap) : cap;
   const finalExpiresAt = new Date(finalExpiresMs).toISOString();
+  const expiresSql = finalExpiresAt.slice(0, 19).replace('T', ' ');
+  const groupname = (plugin && plugin.planGroup) || 'free';
 
-  syncUser(db, { username, password, groupname: (plugin && plugin.planGroup) || 'free' });
+  syncUser(db, { username, password, groupname });
 
   const inputValues = {};
   if (Array.isArray(inputs)) {
@@ -65,22 +71,36 @@ export function grantGuest(db, { plugin, guest, expiresAt, mac, ip, inputs } = {
     ip: ip || null,
     guest_label: (guest && guest.label) || null,
     inputs_json: JSON.stringify(inputValues),
-    expires_at: finalExpiresAt,
+    expires_at: expiresSql,
   });
+
+  // Remember the guest's device for MAC re-auth when the plan asks for it.
+  const m = normMac(mac);
+  if (m) {
+    const plan = db.prepare('SELECT * FROM plans WHERE radius_groupname = ?').get(groupname);
+    if (plan && plan.mac_remember === 1) {
+      const devExp = deviceExpiry(db, { username, plan });
+      if (devExp) {
+        recordDevice(db, { username, mac: m, planId: plan.id, groupname, expiresAt: devExp, source: 'grant' });
+      }
+    }
+  }
 
   return { username, password, expiresAt: finalExpiresAt };
 }
 
 // Remove expired guest-lookup grants (and their RADIUS users). Returns the
-// count removed, same shape as mac/grants.js's sweepMacSessions.
+// count removed, same shape as mac/devices.js's sweepDevices. The guest's
+// remembered devices go with the grant.
 export function sweepPluginGrants(db) {
   const expired = db
-    .prepare("SELECT username FROM plugin_grants WHERE active = 1 AND expires_at <= datetime('now')")
+    .prepare("SELECT username FROM plugin_grants WHERE active = 1 AND datetime(expires_at) <= datetime('now')")
     .all();
   const tx = db.transaction(() => {
     for (const { username } of expired) {
       removeUser(db, username);
       db.prepare('UPDATE plugin_grants SET active = 0 WHERE username = ?').run(username);
+      forgetUserDevices(db, username);
     }
   });
   tx();
@@ -93,7 +113,7 @@ export function listActiveGrants(db) {
       `SELECT g.id, g.plugin_id, p.name AS plugin_name, g.username, g.mac, g.ip,
               g.guest_label, g.granted_at, g.expires_at
          FROM plugin_grants g LEFT JOIN plugins p ON p.id = g.plugin_id
-        WHERE g.active = 1 ORDER BY g.expires_at`,
+        WHERE g.active = 1 ORDER BY datetime(g.expires_at)`,
     )
     .all();
 }
@@ -101,7 +121,10 @@ export function listActiveGrants(db) {
 export function revokeGrant(db, id) {
   const row = db.prepare('SELECT * FROM plugin_grants WHERE id = ?').get(Number(id));
   if (!row) return false;
-  removeUser(db, row.username);
-  db.prepare('UPDATE plugin_grants SET active = 0 WHERE id = ?').run(row.id);
+  db.transaction(() => {
+    removeUser(db, row.username);
+    db.prepare('UPDATE plugin_grants SET active = 0 WHERE id = ?').run(row.id);
+    forgetUserDevices(db, row.username);
+  })();
   return true;
 }

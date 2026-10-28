@@ -54,6 +54,10 @@
   function mb(bytes) { return bytes == null ? '∞' : (bytes / 1048576).toFixed(bytes < 1048576 ? 1 : 0) + ' MB'; }
   function octets(o) { o = o || 0; return o >= 1048576 ? (o / 1048576).toFixed(1) + ' MB' : (o / 1024).toFixed(0) + ' KB'; }
   function mins(secs) { return secs == null ? '∞' : Math.round(secs / 60) + ' min'; }
+  // In-app link to a user's detail page (#user/<name>).
+  function userLink(name, label) {
+    return '<a href="#user/' + encodeURIComponent(name) + '" data-tab="user/' + encodeURIComponent(name) + '">' + esc(label || name) + '</a>';
+  }
   function planLimits(p) {
     var b = [];
     if (p.rate_limit) b.push(p.rate_limit);
@@ -71,15 +75,22 @@
       var act = res[0].active, usage = res[1].usage;
       var rows = act.length
         ? act.map(function (s) {
-            return '<tr><td class="mono">' + esc(s.username) + '</td><td class="mono">' + esc(s.mac || '—') +
+            // A MAC re-auth session's RADIUS username is the MAC itself: show
+            // it plainly and link through to the user that device belongs to.
+            var who = s.by_mac
+              ? '<span class="mono">' + esc(s.username) + '</span>' + (s.owner ? ' <span class="muted">→</span> ' + userLink(s.owner) : '')
+              : userLink(s.username) + (s.owner && s.owner !== s.username ? ' <span class="muted">(device of ' + userLink(s.owner) + ')</span>' : '');
+            var forgets = !!(s.owner || s.by_mac);
+            return '<tr><td class="mono">' + who + '</td><td class="mono">' + esc(s.mac || '—') +
               '</td><td class="mono">' + esc(s.ip || '—') + '</td><td>' + esc(s.acctstarttime || '—') +
               '</td><td>' + octets(s.total_octets) + '</td><td><button class="btn sm danger" data-kick="' +
-              esc(s.acctsessionid) + '">Kick</button></td></tr>';
+              esc(s.acctsessionid) + '"' + (forgets ? ' title="Disconnects the session and forgets the remembered device"' : '') + '>' +
+              (forgets ? 'Kick &amp; forget' : 'Kick') + '</button></td></tr>';
           }).join('')
         : '<tr><td colspan="6" class="empty">No active sessions. (They appear here once the hotspot sends accounting.)</td></tr>';
       var usageRows = usage.length
         ? usage.map(function (u) {
-            return '<tr><td class="mono">' + esc(u.username) + '</td><td>' + u.sessions + '</td><td>' +
+            return '<tr><td class="mono">' + userLink(u.username) + '</td><td>' + u.sessions + '</td><td>' +
               octets(u.total_octets) + '</td><td>' + esc(u.last_start || '—') + '</td></tr>';
           }).join('')
         : '<tr><td colspan="4" class="empty">No usage recorded yet.</td></tr>';
@@ -204,7 +215,7 @@
       var batch = v.batch_id
         ? '<a href="/api/vouchers/print?batch=' + encodeURIComponent(v.batch_id) + '" target="_blank" title="Print this batch\'s unused vouchers">' + esc(v.batch_id) + '</a>'
         : '';
-      return '<tr><td class="mono">' + esc(v.code) + '</td><td>' + esc(v.plan_name || '—') + '</td><td><span class="pill ' +
+      return '<tr><td class="mono">' + userLink(v.code) + '</td><td>' + esc(v.plan_name || '—') + '</td><td><span class="pill ' +
         st + '">' + st + '</span></td><td class="muted">' + win + '</td><td class="muted">' + batch + '</td><td>' + rev + '</td></tr>';
     }).join('');
   }
@@ -261,7 +272,7 @@
       var plans = res[0].plans, accounts = res[1].accounts;
       var planOpts = '<option value="">(no plan)</option>' + plans.map(function (p) { return '<option value="' + p.id + '">' + esc(p.name) + '</option>'; }).join('');
       var rows = accounts.length ? accounts.map(function (a) {
-        return '<tr><td class="mono">' + esc(a.username) + '</td><td>' + esc(a.plan_name || '—') + '</td><td><span class="pill ' +
+        return '<tr><td class="mono">' + userLink(a.username) + '</td><td>' + esc(a.plan_name || '—') + '</td><td><span class="pill ' +
           (a.enabled ? 'on">enabled' : 'off">disabled') + '</span></td><td>' +
           '<button class="btn sm" data-toggle="' + a.id + '" data-en="' + a.enabled + '">' + (a.enabled ? 'Disable' : 'Enable') + '</button> ' +
           '<button class="btn sm danger" data-del="' + a.id + '">Delete</button></td></tr>';
@@ -290,13 +301,17 @@
 
   tabs.devices = function () {
     api('/api/mac').then(function (r) {
-      var rows = r.mac_sessions.length ? r.mac_sessions.map(function (m) {
-        return '<tr><td class="mono">' + esc(m.mac) + '</td><td class="mono">' + esc(m.identity || '—') +
-          '</td><td>' + esc(m.plan_name || '—') + '</td><td>' + esc(m.expires_at) + '</td>' +
+      var list = r.devices || r.mac_sessions || [];
+      var rows = list.length ? list.map(function (m) {
+        var exp = m.expires_at ? esc(sqlLocal(m.expires_at)) + ' <span class="muted">' + esc(relTime(sqlIso(m.expires_at))) + '</span>' : '—';
+        return '<tr><td class="mono">' + esc(m.mac) + '</td><td class="mono">' + (m.username ? userLink(m.username) : '—') +
+          '</td><td>' + esc(m.plan_name || '—') + '</td><td><span class="pill info">' + esc(m.source || '—') + '</span></td>' +
+          '<td class="muted">' + esc(sqlLocal(m.first_seen) || '—') + '</td><td class="muted">' + esc(sqlLocal(m.last_seen) || '—') + '</td>' +
+          '<td>' + exp + '</td>' +
           '<td><button class="btn sm danger" data-forget="' + esc(m.mac) + '">Forget</button></td></tr>';
-      }).join('') : '<tr><td colspan="5" class="empty">No remembered devices. They appear when someone logs in on a MAC-remember plan.</td></tr>';
+      }).join('') : '<tr><td colspan="8" class="empty">No remembered devices. They appear when someone logs in on a MAC-remember plan.</td></tr>';
       view.innerHTML = '<h1>Devices</h1><p class="sub">Devices that auto-reconnect by MAC until their window expires. Forgetting one sends them back to the portal.</p>' +
-        '<div class="card"><table><thead><tr><th>MAC</th><th>First login</th><th>Plan</th><th>Expires</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+        '<div class="card"><table><thead><tr><th>Device MAC</th><th>User</th><th>Plan</th><th>Source</th><th>First seen</th><th>Last seen</th><th>Expires</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>';
       view.querySelectorAll('[data-forget]').forEach(function (b) {
         b.onclick = function () { api('/api/mac/' + encodeURIComponent(b.dataset.forget), { method: 'DELETE' }).then(function () { toast('Device forgotten'); tabs.devices(); }).catch(function (e) { toast(e.message, true); }); };
       });
@@ -2235,6 +2250,11 @@
     if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(s)) s = s.replace(' ', 'T') + 'Z';
     return localStamp(s);
   }
+  // SQLite UTC datetime -> ISO with zone (for relTime); ISO passes through.
+  function sqlIso(s) {
+    if (!s) return '';
+    return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(s) ? s.replace(' ', 'T') + 'Z' : s;
+  }
   function localStamp(iso) {
     var d = new Date(iso);
     if (isNaN(d.getTime())) return String(iso || '');
@@ -2255,9 +2275,9 @@
     var rows = grants.length ? grants.map(function (g) {
       var rel = relTime(g.expires_at);
       var soon = Date.parse(g.expires_at) - Date.now() < 3600000;
-      return '<tr><td><b>' + esc(g.guest_label || '—') + '</b></td>' +
+      return '<tr><td><b>' + (g.guest_label ? userLink(g.username, g.guest_label) : '—') + '</b></td>' +
         '<td>' + esc(g.plugin_name || '<deleted>') + '</td>' +
-        '<td class="mono">' + esc(g.username) + '</td>' +
+        '<td class="mono">' + userLink(g.username) + '</td>' +
         '<td class="mono">' + esc(g.mac || '—') + '</td>' +
         '<td class="mono">' + esc(g.ip || '—') + '</td>' +
         '<td class="muted">' + esc(sqlLocal(g.granted_at) || '—') + '</td>' +
@@ -2289,6 +2309,91 @@
       if (current !== 'guests' || document.body.classList.contains('gated')) return clearTabTimers();
       api('/api/plugins/grants').then(function (r) { renderGuests(r.grants || []); }).catch(function () {});
     }, 30000);
+  };
+
+  // ---- user detail (#user/<name>) ----
+  // Everything about one login identity: what it is, the devices remembered
+  // against it, and the sessions / auth attempts by it or any of its MACs.
+  var KIND_LABELS = { voucher: 'voucher', account: 'account', guest: 'guest', free: 'free', unknown: 'radius only' };
+  function dur(secs) {
+    if (secs == null) return '—';
+    secs = Number(secs) || 0;
+    var h = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60);
+    return h ? h + 'h ' + m + 'm' : m ? m + 'm' : secs + 's';
+  }
+  function statusPill(st) {
+    var cls = { unused: 'unused', active: 'on', enabled: 'on', revoked: 'revoked', expired: 'expired', disabled: 'off', scheduled: 'scheduled', used: 'used' }[st] || 'disabled';
+    return '<span class="pill ' + cls + '">' + esc(st || '—') + '</span>';
+  }
+  function renderUser(name, r) {
+    var u = r.user, devices = r.devices || [], sessions = r.sessions || [], auth = r.auth || [];
+    var plan = u.plan ? esc(u.plan.name || u.plan.groupname || '—') + (u.plan.groupname && u.plan.name ? ' <span class="muted mono">' + esc(u.plan.groupname) + '</span>' : '') : '—';
+    var meta = u.meta || {};
+    var extra = '';
+    if (u.kind === 'guest') extra += '<tr><th>Plugin</th><td>' + esc(meta.plugin_name || (meta.plugin_id != null ? '#' + meta.plugin_id : '—')) + '</td></tr>';
+    if (u.kind === 'voucher' && meta.batch_id) extra += '<tr><th>Batch</th><td class="mono">' + esc(meta.batch_id) + '</td></tr>';
+    if (u.kind === 'voucher' && meta.first_use_at) extra += '<tr><th>First used</th><td>' + esc(sqlLocal(meta.first_use_at)) + '</td></tr>';
+    var summary = '<div class="card"><table class="kv"><tbody>' +
+      '<tr><th>Username</th><td class="mono">' + esc(u.username) + '</td></tr>' +
+      '<tr><th>Kind</th><td>' + esc(KIND_LABELS[u.kind] || u.kind) + '</td></tr>' +
+      '<tr><th>Plan</th><td>' + plan + '</td></tr>' +
+      '<tr><th>Status</th><td>' + statusPill(u.status) + '</td></tr>' +
+      '<tr><th>Created</th><td>' + esc(sqlLocal(u.created_at) || '—') + '</td></tr>' +
+      '<tr><th>Expires</th><td>' + (u.expires_at ? esc(sqlLocal(u.expires_at)) + ' <span class="muted">' + esc(relTime(sqlIso(u.expires_at))) + '</span>' : '—') + '</td></tr>' +
+      extra + '</tbody></table></div>';
+    var devRows = devices.length ? devices.map(function (d) {
+      var on = Number(d.active) === 1;
+      return '<tr><td class="mono">' + esc(d.mac) + '</td><td><span class="pill info">' + esc(d.source || '—') + '</span></td>' +
+        '<td class="muted">' + esc(sqlLocal(d.first_seen) || '—') + '</td><td class="muted">' + esc(sqlLocal(d.last_seen) || '—') + '</td>' +
+        '<td>' + (d.expires_at ? esc(sqlLocal(d.expires_at)) : '—') + '</td>' +
+        '<td>' + (on ? '<span class="pill on">active</span>' : '<span class="pill disabled">forgotten</span>') + '</td>' +
+        '<td>' + (on ? '<button class="btn sm danger" data-uforget="' + esc(d.mac) + '">Forget</button>' : '') + '</td></tr>';
+    }).join('') : '<tr><td colspan="7" class="empty">No devices remembered for this user.</td></tr>';
+    var sesRows = sessions.length ? sessions.map(function (x) {
+      var via = x.username !== u.username ? ' <span class="pill info" title="Re-admitted by MAC">mac</span>' : '';
+      return '<tr><td>' + esc(sqlLocal(x.start) || '—') + '</td><td>' + (x.stop ? esc(sqlLocal(x.stop)) : '<span class="pill on">online</span>') + '</td>' +
+        '<td class="mono">' + esc(x.mac || '—') + via + '</td><td class="mono">' + esc(x.ip || '—') + '</td>' +
+        '<td>' + dur(x.secs) + '</td><td>' + mb((x.in_octets || 0) + (x.out_octets || 0)) + '</td>' +
+        '<td class="muted">' + esc(x.cause || '—') + '</td></tr>';
+    }).join('') : '<tr><td colspan="7" class="empty">No sessions recorded.</td></tr>';
+    var authRows = auth.length ? auth.map(function (a) {
+      var ok = /accept/i.test(a.reply || '');
+      return '<tr><td class="muted">' + esc(sqlLocal(a.authdate) || '—') + '</td><td class="mono">' + esc(a.username) + '</td>' +
+        '<td><span class="pill ' + (ok ? 'on' : 'off') + '">' + esc(a.reply || '—') + '</span></td></tr>';
+    }).join('') : '<tr><td colspan="3" class="empty">No authentication attempts recorded.</td></tr>';
+    view.innerHTML =
+      '<h1>' + esc(u.label || u.username) + ' <span class="pill kind-pill kind-' + esc(u.kind) + '">' + esc(KIND_LABELS[u.kind] || u.kind) + '</span></h1>' +
+      '<p class="sub">Everything recorded for this login — its remembered devices, and sessions and auth attempts by it or by any of its devices.</p>' +
+      summary +
+      '<div class="card"><h2>Devices</h2><table><thead><tr><th>MAC</th><th>Source</th><th>First seen</th><th>Last seen</th><th>Expires</th><th>State</th><th></th></tr></thead><tbody>' + devRows + '</tbody></table></div>' +
+      '<div class="card"><h2>Sessions</h2><table><thead><tr><th>Start</th><th>Stop</th><th>MAC</th><th>IP</th><th>Duration</th><th>Usage</th><th>Ended by</th></tr></thead><tbody>' + sesRows + '</tbody></table></div>' +
+      '<div class="card"><h2>Auth log</h2><table><thead><tr><th>When</th><th>Username</th><th>Reply</th></tr></thead><tbody>' + authRows + '</tbody></table></div>';
+    view.querySelectorAll('[data-uforget]').forEach(function (b) {
+      b.onclick = function () {
+        if (!confirm('Forget this device? It will have to log in through the portal again.')) return;
+        b.disabled = true;
+        api('/api/users/' + encodeURIComponent(u.username) + '/devices/' + encodeURIComponent(b.dataset.uforget), { method: 'DELETE' })
+          .then(function () { toast('Device forgotten'); loadUser(name); })
+          .catch(function (e) { toast(e.message, true); b.disabled = false; });
+      };
+    });
+  }
+  function loadUser(name) {
+    var route = current;
+    return api('/api/users/' + encodeURIComponent(name)).then(function (r) {
+      if (current !== route) return; // navigated away while loading
+      if (r.redirect) return show('user/' + encodeURIComponent(r.redirect));
+      renderUser(name, r);
+    }).catch(function (e) {
+      if (current !== route) return;
+      view.innerHTML = '<h1>' + esc(name) + '</h1><p class="bad">' + esc(e.status === 404 ? 'No user with that name.' : e.message) + '</p>';
+    });
+  }
+  tabs.user = function () {
+    var name = routeSub;
+    if (!name) { view.innerHTML = '<h1>User</h1><p class="muted">No user selected.</p>'; return; }
+    view.innerHTML = '<h1>' + esc(name) + '</h1><p class="muted">Loading…</p>';
+    loadUser(name);
   };
 
   // ---- tiny view helpers ----
@@ -2325,12 +2430,13 @@
   var TITLES = { active: 'Active sessions', devices: 'Devices', plans: 'Plans', vouchers: 'Vouchers',
     accounts: 'Accounts', plugins: 'Guest lookup', guests: 'Guests', logs: 'Logs', settings: 'Settings',
     announcements: 'Announcements', system: 'System', router: 'Router setup', backup: 'Backup & migrate', help: 'Help',
-    designs: 'Designs' };
+    designs: 'Designs', user: 'User' };
   function show(tab, opts) {
     opts = opts || {};
     clearTabTimers();
     var base = tab.split('/')[0];
     routeSub = tab.indexOf('/') !== -1 ? tab.slice(tab.indexOf('/') + 1) : '';
+    if (base === 'user') { try { routeSub = decodeURIComponent(routeSub); } catch (e) { /* keep raw */ } }
     if (base === 'logs' && routeSub) logSub = routeSub;
     document.querySelectorAll('#nav a[data-tab]').forEach(function (a) { a.classList.toggle('active', a.dataset.tab === base); });
     current = tab;

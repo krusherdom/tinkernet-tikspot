@@ -3,7 +3,7 @@
 // router terminal instead of giving the container write credentials. Every object is
 // keyed by the managed comment, so the script is safe to re-run (set-or-add).
 
-import { MANAGED_COMMENT, isIpHost, COA_PORT } from './rest.js';
+import { MANAGED_COMMENT, isIpHost, COA_PORT, loginByValue, MAC_AUTH_MODE } from './rest.js';
 
 // Quote + escape a value for a RouterOS string argument.
 function q(v) {
@@ -23,7 +23,8 @@ function block(label, menu, findExpr, setArgs, addArgs) {
   );
 }
 
-export function buildSetupScript({ containerIp, serverHost, nasSecret }) {
+// `macCookie` = the "Use MAC cookies" setting (default off), as in autoConfigure.
+export function buildSetupScript({ containerIp, serverHost, nasSecret, macCookie = false }) {
   const ip = containerIp || '';
   const host = String(serverHost || '').trim();
   const useHostname = host && !isIpHost(host);
@@ -54,7 +55,7 @@ export function buildSetupScript({ containerIp, serverHost, nasSecret }) {
   // Every hotspot profile -> use RADIUS (mirrors autoConfigure, which patches all).
   s += '# Point every hotspot profile at RADIUS:\n';
   // (hotspot profiles have no comment field — do not add one.)
-  s += `/ip/hotspot/profile set [find] use-radius=yes login-by="mac-cookie,http-chap,http-pap,mac"\n`;
+  s += `/ip/hotspot/profile set [find] use-radius=yes login-by="${loginByValue(macCookie)}" mac-auth-mode=${MAC_AUTH_MODE}\n`;
   s += ':put "Tikspot hotspot profiles: use-radius enabled"\n\n';
 
   // Walled-garden IP so pre-login clients can reach the container.

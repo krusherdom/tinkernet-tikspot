@@ -147,7 +147,8 @@ port), publish it:
    - **Test connection**, then **Auto-configure** — adds the RADIUS client → the
      container, enables RADIUS CoA (`/radius incoming set accept=yes port=3799`, needed
      for the admin "Kick" button to actually work), sets each hotspot profile to
-     `use-radius` + `login-by=mac-cookie,http-chap,http-pap,mac`, adds the DNS static
+     `use-radius` + `login-by=http-chap,http-pap,mac mac-auth-mode=mac-as-username`
+     (MAC cookies are off by default from 0.18.0 — see setup-mikrotik.md), adds the DNS static
      for the server-name, and walled-gardens the container.
    - **Not covered by Auto-configure:** the srcnat masquerade for the container's
      outbound internet (guest-lookup plugins, the System page's egress check) — add it

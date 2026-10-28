@@ -500,7 +500,8 @@ test('ensureHotspotProfile: creates with RADIUS + interface address, updates by 
   assert.equal(prof['hotspot-address'], '10.5.50.1');
   assert.equal(prof['use-radius'], 'yes');
   assert.equal(prof['radius-accounting'], 'yes');
-  assert.equal(prof['login-by'], 'mac-cookie,http-chap,http-pap,mac');
+  assert.equal(prof['login-by'], 'http-chap,http-pap,mac');
+  assert.equal(prof['mac-auth-mode'], 'mac-as-username');
   assert.equal(prof['dns-name'], 'login.wifi');
   assert.equal(prof.comment, undefined, 'profiles have no comment field on RouterOS');
 

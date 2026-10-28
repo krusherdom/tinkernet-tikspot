@@ -319,3 +319,11 @@ textarea.mono-ta { font-family: var(--font-mono); font-size: 12.5px; }
 
 .nowrap { white-space: nowrap; }
 tr.is-editing td { background: rgb(var(--blue-rgb) / 0.08); }
+
+/* User detail page (#user/<name>) */
+h1 .kind-pill { vertical-align: middle; margin-left: 8px; font-size: 11px; }
+.pill.kind-voucher, .pill.kind-account { background: rgb(var(--blue-rgb) / 0.16); color: var(--blue); }
+.pill.kind-guest { background: rgb(var(--sky-rgb) / 0.16); color: var(--sky); }
+.pill.kind-free { background: var(--lime-deep); color: var(--lime); }
+.pill.kind-unknown { background: var(--surface-raised); color: var(--text-muted); }
+table.kv th { width: 140px; white-space: nowrap; }

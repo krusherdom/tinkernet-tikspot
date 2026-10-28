@@ -52,6 +52,7 @@ export const SETTINGS_REGISTRY = [
   { key: 'plugin_catalog_url', type: 'text', default: 'https://raw.githubusercontent.com/krusherdom/tinkernet-tikspot/main/plugins/index.json', group: 'Guest lookup plugins', label: 'Plugin catalog URL', help: 'Where "Browse catalog" looks for community recipes: a catalog index.json, a GitHub folder URL (…/tree/main/plugins) or a raw/blob URL. The container needs outbound internet to fetch it.' },
   // Router
   { key: 'hotspot_profiles', type: 'json', default: null, group: 'Router', label: 'Hotspot profiles to manage', help: 'JSON array of hotspot profile names Auto-configure should point at RADIUS, e.g. ["hsprof1"]. Leave empty to manage every profile.' },
+  { key: 'hotspot_mac_cookie', type: 'bool', default: false, group: 'Router', label: 'Use MAC cookies', help: "RouterOS mac-cookie re-login. Off by default: Tikspot remembers each device against its user and re-admits it by MAC for the user's validity. Turn on only if you want the router's own cookie re-login as well." },
   // Health
   { key: 'egress_check_url', type: 'text', default: '', group: 'System', label: 'Egress check URL', help: 'Optional URL the container fetches on the System page to confirm outbound internet works (needed for lookup plugins). Leave blank to skip.' },
 ];

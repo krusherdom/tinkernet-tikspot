@@ -17,6 +17,11 @@ export const RETENTION_TABLES = [
   { table: 'events', tsCol: 'created_at', idCol: 'id' },
 ];
 
+// Expired users' bookkeeping (forgotten remembered devices, finished plugin
+// grants) is kept this many days after expiry for support lookups, then purged.
+export const USER_PURGE_DAYS = 7;
+const USER_PURGE_TABLES = ['user_devices', 'plugin_grants'];
+
 // Pure helper (unit-tested): the cutoff timestamp (SQLite datetime format) and
 // row cap for a policy.
 export function retentionCutoffs({ days, maxRows }, nowMs = Date.now()) {
@@ -51,6 +56,14 @@ export function pruneNow(db, nowMs = Date.now()) {
       }
       result[t.table] = n;
     }
+    // Inactive user_devices / plugin_grants rows, USER_PURGE_DAYS after expiry.
+    // datetime() so pre-0.18 ISO expires_at strings compare correctly.
+    const purgeCutoff = new Date(nowMs - USER_PURGE_DAYS * 86400 * 1000).toISOString().slice(0, 19).replace('T', ' ');
+    for (const table of USER_PURGE_TABLES) {
+      result[table] = db
+        .prepare(`DELETE FROM ${table} WHERE active = 0 AND datetime(expires_at) < datetime(?)`)
+        .run(purgeCutoff).changes;
+    }
   });
   tx();
   return result;
@@ -73,7 +86,7 @@ export function sweepRetention(db, log, nowMs = Date.now()) {
 
 // Per-table row counts + DB size for the Logs "Storage" card.
 export function storageStats(db) {
-  const tables = ['radpostauth', 'radacct', 'admin_audit', 'events', 'radcheck', 'vouchers', 'accounts', 'mac_sessions'];
+  const tables = ['radpostauth', 'radacct', 'admin_audit', 'events', 'radcheck', 'vouchers', 'accounts', 'user_devices', 'plugin_grants'];
   const counts = {};
   for (const t of tables) {
     try {

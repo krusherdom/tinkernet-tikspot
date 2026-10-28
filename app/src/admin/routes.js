@@ -34,6 +34,7 @@ import { getSetting, getJSON } from '../db/settings.js';
 import { ASSETS_DIR } from '../config.js';
 import { validateDesignJson } from './validate.js';
 import { logAudit } from './audit.js';
+import usersRoutes from './users.js';
 
 function shimContentType(name) {
   if (name.endsWith('.json')) return 'application/json';
@@ -48,6 +49,9 @@ function safeName(name) {
 
 export default async function adminRoutes(app) {
   const db = app.db;
+
+  // ---- Per-user detail (/api/users/:username) — see admin/users.js ----------
+  await usersRoutes(app);
 
   // ---- Block/theme registry ----------------------------------------------
   // The single source of truth for the editor's block picker + property

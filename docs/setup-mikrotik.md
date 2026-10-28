@@ -92,7 +92,7 @@ walks you through setting an admin password and (optionally) connecting your Mik
 On the **Router setup** step, enter the router's IP + API credentials, the container IP,
 the hotspot server-name and the RADIUS secret, then click **Auto-configure**. Over the
 RouterOS REST API it will: add the RADIUS client pointing at the container, set each
-hotspot profile to `use-radius` + `login-by=mac-cookie,http-chap,http-pap,mac`, add the
+hotspot profile to `use-radius` + `login-by=http-chap,http-pap,mac mac-auth-mode=mac-as-username`, add the
 DNS static entry for the server-name, and walled-garden the container. **Test
 connection** and **Verify** are there too. You can re-run any of this later from the
 Router setup tab.
@@ -115,7 +115,7 @@ If you'd rather do it by hand, the same steps are:
 1. Add the container as a RADIUS server (`/radius add address=172.18.0.3 secret=... service=hotspot`).
 2. Set the hotspot profile to use RADIUS and the right login methods, **including `mac`**
    for MAC re-auth
-   (`/ip/hotspot/profile set ... use-radius=yes login-by=mac-cookie,http-chap,http-pap,mac`).
+   (`/ip/hotspot/profile set ... use-radius=yes login-by=http-chap,http-pap,mac mac-auth-mode=mac-as-username`).
 3. Enable RADIUS CoA so "Kick" works (`/radius incoming set accept=yes port=3799`).
 4. Name the hotspot server so its redirect points at the container, and add a
    DNS static entry + walled-garden entry so unauthenticated clients can reach it.
@@ -150,7 +150,7 @@ To point a **real MikroTik** at the container's RADIUS (manual, pre-wizard):
 /radius add address=<container-ip> secret=<nas-secret> service=hotspot \
     authentication-port=1812 accounting-port=1813 timeout=3s
 /ip/hotspot/profile set <profile> use-radius=yes \
-    login-by=mac-cookie,http-chap,http-pap,mac radius-accounting=yes
+    login-by=http-chap,http-pap,mac mac-auth-mode=mac-as-username radius-accounting=yes
 ```
 
 > `clients.conf` inside the container is **rendered from the configured NAS
@@ -255,8 +255,25 @@ Tikspot's portal form posts) and `mac` (MAC re-auth for remembered devices);
 hardware):
 
 ```
-/ip/hotspot/profile set [find] login-by=mac-cookie,http-chap,http-pap,mac
+/ip/hotspot/profile set [find] login-by=http-chap,http-pap,mac mac-auth-mode=mac-as-username
 ```
+
+**Device memory and MAC cookies (0.18.0).** Tikspot remembers each client MAC
+against the user that logged in and creates a RADIUS user `username=<MAC>` with
+`Auth-Type := Accept` (no password) for the rest of that user's validity. When the
+device comes back, RouterOS tries `login-by=mac` and, with
+`mac-auth-mode=mac-as-username` (the RouterOS default), sends the MAC as the
+User-Name with an **empty** User-Password — exactly what that Accept entry matches.
+Tikspot targets that mode, so Verify fails when the profile is set to
+`mac-as-username-and-password` (which sends the MAC, or `mac-auth-password`, as a
+password instead). Because device memory does
+the re-admit, RouterOS's own `mac-cookie` login is **optional and off by default**;
+turn on **Settings → Router → Use MAC cookies** if you want the router's cookie
+re-login as well (login-by then becomes `mac-cookie,http-chap,http-pap,mac`). Verify
+warns (non-blocking) when the router's `mac-cookie` doesn't match that setting.
+**Upgrading:** routers configured by an earlier Tikspot still have `mac-cookie` in
+`login-by`; running **Auto-configure** on 0.18.0 removes it and sets
+`mac-auth-mode=mac-as-username` (or paste the regenerated manual script).
 
 <a id="dns-static"></a>
 ### DNS static

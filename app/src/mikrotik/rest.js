@@ -13,6 +13,20 @@
 import http from 'node:http';
 import https from 'node:https';
 import { matchPlacement, cidrCovers } from './placement.js';
+import { getTyped } from '../db/settings.js';
+
+// Hotspot login-by. MAC cookies are OFF by default from 0.18.0: Tikspot remembers
+// each device against its user and RADIUS re-admits it by MAC (login-by=mac,
+// mac-auth-mode=mac-as-username → User-Name=<MAC>, empty User-Password, matched by
+// an Auth-Type := Accept user). The "Use MAC cookies" setting adds RouterOS's own
+// cookie re-login back on top.
+export const LOGIN_BY_WITH_COOKIE = 'mac-cookie,http-chap,http-pap,mac';
+export const LOGIN_BY_NO_COOKIE = 'http-chap,http-pap,mac';
+export const MAC_AUTH_MODE = 'mac-as-username';
+export const loginByValue = (macCookie) => (macCookie ? LOGIN_BY_WITH_COOKIE : LOGIN_BY_NO_COOKIE);
+export function loginByFor(db) {
+  return loginByValue(getTyped(db, 'hotspot_mac_cookie') === true);
+}
 
 // Comment stamped on every router object the setup wizard creates (DNS static,
 // walled-garden rules). Re-running setup finds its own objects by this marker and
@@ -48,7 +62,7 @@ export const COA_PORT = '3799';
 const MANAGED_MENUS = [
   { key: 'radius', menu: '/radius', fields: ['address', 'service'] },
   { key: 'dns-static', menu: '/ip/dns/static', fields: ['name', 'address'] },
-  { key: 'hotspot-profile', menu: '/ip/hotspot/profile', fields: ['name', 'use-radius', 'login-by'] },
+  { key: 'hotspot-profile', menu: '/ip/hotspot/profile', fields: ['name', 'use-radius', 'login-by', 'mac-auth-mode'] },
   { key: 'walled-garden-ip', menu: '/ip/hotspot/walled-garden/ip', fields: ['action', 'dst-address'] },
   { key: 'walled-garden-host', menu: '/ip/hotspot/walled-garden', fields: ['action', 'dst-host'] },
 ];
@@ -218,7 +232,7 @@ export async function ensureRadiusIncoming(router, { port = COA_PORT } = {}) {
 // An operator's existing comment is preserved (our marker is appended).
 export async function configureHotspotProfile(
   router,
-  { loginBy = 'mac-cookie,http-chap,http-pap,mac', profiles = null } = {},
+  { macCookie = false, loginBy = loginByValue(macCookie), profiles = null } = {},
 ) {
   const all = await router.list('/ip/hotspot/profile');
   const rows = Array.isArray(all) ? all : [];
@@ -236,6 +250,7 @@ export async function configureHotspotProfile(
     await router.patch('/ip/hotspot/profile', p['.id'], {
       'use-radius': 'yes',
       'login-by': loginBy,
+      'mac-auth-mode': MAC_AUTH_MODE,
     });
     results.push(p.name);
   }
@@ -303,8 +318,6 @@ export async function ensureWalledGarden(router, { address, host }) {
 // Hotspot provisioning (zero-touch bootstrap). These create the hotspot itself
 // rather than assuming the operator already ran the RouterOS hotspot wizard.
 
-const DEFAULT_LOGIN_BY = 'mac-cookie,http-chap,http-pap,mac';
-
 // A configuration problem we detected ourselves (not a transport failure), so
 // autoConfigure must not mistake it for "router unreachable".
 function configError(message) {
@@ -332,7 +345,7 @@ export async function interfaceAddress(router, iface) {
 // so it is identified by name only.
 export async function ensureHotspotProfile(
   router,
-  { name = 'tikspot', interface: iface, hotspotAddress, dnsName, serverHost, loginBy = DEFAULT_LOGIN_BY } = {},
+  { name = 'tikspot', interface: iface, hotspotAddress, dnsName, serverHost, macCookie = false, loginBy = loginByValue(macCookie) } = {},
 ) {
   if (dnsName && serverHost && dnsName.trim().toLowerCase() === String(serverHost).trim().toLowerCase()) {
     throw configError(
@@ -340,7 +353,7 @@ export async function ensureHotspotProfile(
     );
   }
   const address = hotspotAddress || (iface ? (await interfaceAddress(router, iface)).ip : null);
-  const body = { 'use-radius': 'yes', 'radius-accounting': 'yes', 'login-by': loginBy };
+  const body = { 'use-radius': 'yes', 'radius-accounting': 'yes', 'login-by': loginBy, 'mac-auth-mode': MAC_AUTH_MODE };
   if (address) body['hotspot-address'] = address;
   if (dnsName) body['dns-name'] = dnsName;
   const r = await readMenu(router, '/ip/hotspot/profile');
@@ -430,7 +443,10 @@ export async function listManaged(router) {
 // `hotspot: { interface, profileName, dnsName }` (optional) additionally
 // provisions the hotspot itself: profile, server (named after serverHost) and
 // the DHCP network's DNS server.
-export async function autoConfigure(router, { containerIp, nasSecret, serverHost, profiles = null, hotspot = null } = {}) {
+//
+// `macCookie` (the "Use MAC cookies" setting, default off) picks login-by — see
+// loginByValue.
+export async function autoConfigure(router, { containerIp, nasSecret, serverHost, profiles = null, hotspot = null, macCookie = false } = {}) {
   // A literal-IP server-name resolves itself, so only a real hostname needs a DNS
   // static + host walled-garden entry.
   const host = serverHost && !isIpHost(serverHost) ? serverHost : null;
@@ -444,10 +460,10 @@ export async function autoConfigure(router, { containerIp, nasSecret, serverHost
     ...(hs
       ? [{
           step: 'hotspot-profile-ensure',
-          run: () => ensureHotspotProfile(router, { name: hs.profileName, interface: hs.interface, dnsName: hs.dnsName, serverHost }),
+          run: () => ensureHotspotProfile(router, { name: hs.profileName, interface: hs.interface, dnsName: hs.dnsName, serverHost, macCookie }),
         }]
       : []),
-    { step: 'hotspot-profile', run: () => configureHotspotProfile(router, { profiles }) },
+    { step: 'hotspot-profile', run: () => configureHotspotProfile(router, { profiles, macCookie }) },
     ...(hs
       ? [{
           step: 'hotspot-server',
@@ -520,7 +536,7 @@ const fmt = (menu, e, fields) =>
 
 const yes = (v) => v === 'yes' || v === 'true' || v === true;
 
-export async function verifyConfig(router, { containerIp, serverHost } = {}) {
+export async function verifyConfig(router, { containerIp, serverHost, macCookie = false } = {}) {
   const [radius, incoming, profiles, servers, dns, dnsCfg, wgIp, wgHost, nat, containers, veths, addrs] =
     await Promise.all([
       readMenu(router, '/radius'),
@@ -643,6 +659,45 @@ export async function verifyConfig(router, { containerIp, serverHost } = {}) {
         docs: 'login-methods',
         hint: 'Optional. CHAP hashes the password client-side; Tikspot defaults to PAP.',
         detail: parts.includes('http-chap') ? '' : 'optional — add http-chap to login-by to allow CHAP logins',
+      }));
+      // MAC cookies should match the "Use MAC cookies" setting. Advisory only:
+      // either way guests can log in.
+      const hasCookie = parts.includes('mac-cookie');
+      const cookieOk = hasCookie === !!macCookie;
+      checks.push(mk('Hotspot MAC cookies match the "Use MAC cookies" setting', cookieOk ? 'pass' : 'fail', {
+        required: false,
+        docs: 'login-methods',
+        hint: 'Run Auto-configure to apply the setting, or change "Use MAC cookies" (Settings → Router) to match the router.',
+        detail: cookieOk
+          ? ''
+          : hasCookie
+            ? 'login-by includes mac-cookie but "Use MAC cookies" is off — run Auto-configure, or turn "Use MAC cookies" on'
+            : 'login-by lacks mac-cookie but "Use MAC cookies" is on — run Auto-configure, or turn "Use MAC cookies" off',
+      }));
+    }
+  }
+
+  // --- MAC auth mode ------------------------------------------------------
+  // Remembered devices are RADIUS users username=<MAC> with Auth-Type := Accept;
+  // that only matches when RouterOS sends the MAC as the username with an empty
+  // password (mac-as-username, the RouterOS default).
+  {
+    const prof = radiusProfiles[0] || (profiles.ok ? profiles.rows[0] : null);
+    const c = 'Hotspot profile mac-auth-mode';
+    const o = {
+      docs: 'login-methods',
+      hint: `/ip/hotspot/profile set ${prof?.name || '<name>'} mac-auth-mode=${MAC_AUTH_MODE}`,
+    };
+    if (!profiles.ok) checks.push(unknown(c, profiles, o));
+    else if (!prof) checks.push(mk(c, 'fail', { ...o, detail: 'no hotspot profile found' }));
+    else {
+      // Absent = RouterOS default (mac-as-username).
+      const mode = String(prof['mac-auth-mode'] ?? MAC_AUTH_MODE);
+      const good = mode === MAC_AUTH_MODE;
+      checks.push(mk(c, good ? 'pass' : 'fail', {
+        ...o,
+        detail: good ? '' : `mac-auth-mode is "${mode}" — remembered devices need ${MAC_AUTH_MODE} (MAC as username, empty password)`,
+        raw: good ? fmt('/ip/hotspot/profile', { ...prof, 'mac-auth-mode': mode }, ['name', 'mac-auth-mode']) : '',
       }));
     }
   }

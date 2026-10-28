@@ -14,6 +14,7 @@
 // lookup time — see portal/routes.js. An explicitly-set leeway always wins.
 
 import { validateRecipe, stripSecrets } from './recipe.js';
+import { syncMacUser } from '../radius/sync.js';
 
 function parseJson(text, fallback) {
   if (!text) return fallback;
@@ -202,6 +203,23 @@ export function updatePlugin(db, id, body) {
           WHERE username IN (SELECT username FROM plugin_grants WHERE plugin_id = ? AND active = 1)`,
       )
       .run(merged.planGroup, row.id).changes;
+    // Their remembered devices (MAC re-auth users) move with them, so a MAC
+    // login lands in the new group too.
+    const devices = db
+      .prepare(
+        `SELECT mac FROM user_devices
+          WHERE active = 1 AND username IN (SELECT username FROM plugin_grants WHERE plugin_id = ? AND active = 1)`,
+      )
+      .all(row.id);
+    if (devices.length) {
+      db.prepare(
+        `UPDATE user_devices SET groupname = @g,
+                plan_id = COALESCE((SELECT id FROM plans WHERE radius_groupname = @g), plan_id)
+          WHERE active = 1 AND username IN (SELECT username FROM plugin_grants WHERE plugin_id = @id AND active = 1)`,
+      ).run({ g: merged.planGroup, id: row.id });
+      for (const { mac } of devices) syncMacUser(db, { mac, groupname: merged.planGroup });
+    }
+    res.movedDevices = devices.length;
   }
   return res;
 }

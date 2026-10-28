@@ -21,8 +21,7 @@ import { getSetting, setSetting, getBool, getJSON } from '../db/settings.js';
 import { hashPassword } from './auth.js';
 import { RouterOS, autoConfigure, verifyConfig, listManaged, isPermissionError } from '../mikrotik/rest.js';
 import { buildSetupScript } from '../mikrotik/script.js';
-import { activeMacSessions } from '../mac/grants.js';
-import { removeUser } from '../radius/sync.js';
+import { listActiveDevices, forgetDevice, normMac } from '../mac/devices.js';
 import { ensureNasSecret } from '../radius/nas.js';
 import { applyNasSecret } from '../radius/clientsconf.js';
 import { validateRouterSettings } from './validate.js';
@@ -65,6 +64,7 @@ export async function runAutoConfigure(db, { hotspot = null, router = routerFrom
   // Ensure a real shared secret exists (generates + persists a strong random
   // one if the admin didn't set one) — never the old "testing123" placeholder.
   const result = await autoConfigure(router, {
+    macCookie: getBool(db, 'hotspot_mac_cookie', false),
     containerIp: getSetting(db, 'container_ip', ''),
     nasSecret: ensureNasSecret(db),
     serverHost: serverHostOf(getSetting(db, 'server_name', '')),
@@ -202,6 +202,7 @@ export default async function setupRoutes(app) {
     if (!router) return reply.code(400).send({ error: 'router not configured' });
     try {
       return await verifyConfig(router, {
+        macCookie: getBool(db, 'hotspot_mac_cookie', false),
         containerIp: getSetting(db, 'container_ip', ''),
         serverHost: serverHostOf(getSetting(db, 'server_name', '')),
       });
@@ -219,6 +220,7 @@ export default async function setupRoutes(app) {
   // can configure the router by hand (no write credentials needed in the container).
   app.get('/api/setup/script', async (_req) => ({
     script: buildSetupScript({
+      macCookie: getBool(db, 'hotspot_mac_cookie', false),
       containerIp: getSetting(db, 'container_ip', ''),
       serverHost: serverHostOf(getSetting(db, 'server_name', '')),
       nasSecret: ensureNasSecret(db),
@@ -262,11 +264,12 @@ export default async function setupRoutes(app) {
   app.get('/api/help', async () => buildHelp());
 
   // ---- Remembered devices (MAC re-auth) ----
-  app.get('/api/mac', async () => ({ mac_sessions: activeMacSessions(db) }));
-  app.delete('/api/mac/:mac', async (req) => {
-    const mac = req.params.mac;
-    removeUser(db, mac);
-    db.prepare('UPDATE mac_sessions SET active = 0 WHERE mac = ?').run(mac);
-    return { ok: true };
+  app.get('/api/mac', async () => ({ devices: listActiveDevices(db) }));
+  app.delete('/api/mac/:mac', async (req, reply) => {
+    const mac = normMac(req.params.mac);
+    if (!mac) return reply.code(400).send({ error: 'invalid MAC address' });
+    const forgot = forgetDevice(db, mac);
+    logAudit(db, req, 'device.forget', mac);
+    return { ok: true, forgot };
   });
 }

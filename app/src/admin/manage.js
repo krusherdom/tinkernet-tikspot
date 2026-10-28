@@ -13,6 +13,7 @@ import { sweepVouchers, voucherValidity } from '../voucher/sweeper.js';
 import { getNasSecret } from '../radius/nas.js';
 import { validateRateLimit, validateNonNegInt, validatePassword, validateExpiryMode } from './validate.js';
 import { logAudit } from './audit.js';
+import { forgetUserDevices, forgetDevice, ownerOfMac } from '../mac/devices.js';
 
 // HTML-escape for the server-rendered print sheet.
 function esc(s) {
@@ -295,8 +296,9 @@ body{margin:0}
     if (!v) return reply.code(404).send({ error: 'not found' });
     removeUser(db, v.code);
     db.prepare("UPDATE vouchers SET status = 'revoked' WHERE id = ?").run(v.id);
-    logAudit(db, req, 'voucher.revoke', v.code);
-    return { ok: true };
+    const forgot = forgetUserDevices(db, v.code);
+    logAudit(db, req, 'voucher.revoke', v.code + (forgot ? ` (forgot ${forgot} device${forgot === 1 ? '' : 's'})` : ''));
+    return { ok: true, forgotDevices: forgot };
   });
 
   // ---- Accounts ----------------------------------------------------------
@@ -368,8 +370,10 @@ body{margin:0}
       groupname: plan?.radius_groupname,
       enabled: enabled === 1,
     });
-    logAudit(db, req, 'account.update', acc.username);
-    return { ok: true };
+    // Disabling an account forgets its remembered devices (MAC re-auth).
+    const forgot = enabled === 1 ? 0 : forgetUserDevices(db, acc.username);
+    logAudit(db, req, 'account.update', acc.username + (forgot ? ` (forgot ${forgot} device${forgot === 1 ? '' : 's'})` : ''));
+    return { ok: true, ...(forgot ? { forgotDevices: forgot } : {}) };
   });
 
   app.delete('/api/accounts/:id', async (req, reply) => {
@@ -377,8 +381,9 @@ body{margin:0}
     if (!acc) return reply.code(404).send({ error: 'not found' });
     removeUser(db, acc.username);
     db.prepare('DELETE FROM accounts WHERE id = ?').run(acc.id);
-    logAudit(db, req, 'account.delete', acc.username);
-    return { ok: true };
+    const forgot = forgetUserDevices(db, acc.username);
+    logAudit(db, req, 'account.delete', acc.username + (forgot ? ` (forgot ${forgot} device${forgot === 1 ? '' : 's'})` : ''));
+    return { ok: true, forgotDevices: forgot };
   });
 
   // ---- Active users / usage / kick --------------------------------------
@@ -401,10 +406,22 @@ body{margin:0}
       username: session.username,
       framedIp: session.framedipaddress,
     });
+    // Kicking also forgets the device's MAC re-auth (else login-by=mac would
+    // silently re-admit it) unless the caller sends { forget: false }.
+    let forgot = false;
     if (result.ok) {
       closeSession(db, session.acctsessionid);
-      logAudit(db, req, 'session.kick', session.username);
+      const wantForget = !(req.body && req.body.forget === false);
+      if (wantForget && session.callingstationid && ownerOfMac(db, session.callingstationid)) {
+        forgot = forgetDevice(db, session.callingstationid);
+      }
+      logAudit(
+        db,
+        req,
+        'session.kick',
+        session.username + (forgot ? ` (forgot device ${session.callingstationid})` : ''),
+      );
     }
-    return { ok: result.ok, output: result.output };
+    return { ok: result.ok, output: result.output, forgot };
   });
 }

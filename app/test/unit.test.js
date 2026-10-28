@@ -130,6 +130,10 @@ test('buildSetupScript emits idempotent hotspot config with embedded values (IP 
   assert.match(s, /\/radius add address="172\.18\.0\.3" secret="sek" service=hotspot/);
   assert.ok(s.includes(MANAGED_COMMENT)); // tagged with the managed comment
   assert.match(s, /\/ip\/hotspot\/profile set \[find\] use-radius=yes/);
+  // 0.18.0: MAC cookies off by default; MAC re-auth sends the MAC as username.
+  assert.ok(s.includes('login-by="http-chap,http-pap,mac" mac-auth-mode=mac-as-username'));
+  const withCookie = buildSetupScript({ containerIp: '172.18.0.3', serverHost: '172.18.0.3', nasSecret: 'sek', macCookie: true });
+  assert.ok(withCookie.includes('login-by="mac-cookie,http-chap,http-pap,mac" mac-auth-mode=mac-as-username'));
   assert.match(s, /walled-garden\/ip add action=accept dst-address="172\.18\.0\.3"/);
   // CoA / kick support — without this "Kick" silently does nothing.
   assert.ok(s.includes('/radius incoming set accept=yes port=3799'));
@@ -234,7 +238,7 @@ function verifyFixtures({ containerIp, serverHost, radius = 'ok' } = {}) {
   const fx = {
     '/radius': radius === 'ok' ? [{ '.id': '*1', address: containerIp, service: 'hotspot', comment: 'x' }] : [],
     '/radius/incoming': { accept: 'yes', port: '3799' },
-    '/ip/hotspot/profile': [{ '.id': '*2', name: 'default', 'use-radius': 'yes', 'login-by': 'mac-cookie,http-chap,http-pap,mac' }],
+    '/ip/hotspot/profile': [{ '.id': '*2', name: 'default', 'use-radius': 'yes', 'login-by': 'http-chap,http-pap,mac', 'mac-auth-mode': 'mac-as-username' }],
     // Named after the portal host — $(server-name) is the server entry's name.
     '/ip/hotspot': [{ '.id': '*3', name: serverHost, interface: 'bridge1', profile: 'default' }],
     '/ip/dns/static': [{ '.id': '*4', name: serverHost, address: containerIp }],
@@ -359,7 +363,7 @@ test('autoConfigure marks the router unreachable and skips remaining steps on a 
 });
 
 // --- hardware findings from the test RB5009 (RouterOS 7.23), 2026-09-08 ---------
-import { configureHotspotProfile, ensureDnsRemoteRequests, verifyConfig as verifyCfg2 } from '../src/mikrotik/rest.js';
+import { configureHotspotProfile, ensureDnsRemoteRequests, verifyConfig as verifyCfg2, loginByFor } from '../src/mikrotik/rest.js';
 import { matchPlacement } from '../src/mikrotik/placement.js';
 
 function stubRouter(menus, calls) {
@@ -380,6 +384,69 @@ test('hotspot profile PATCH never sends a comment (RouterOS has no such field)',
   assert.equal(patch[1], '/ip/hotspot/profile');
   assert.equal('comment' in patch[3], false);
   assert.equal(patch[3]['use-radius'], 'yes');
+  // 0.18.0 default: no mac-cookie, MAC re-auth as username with empty password.
+  assert.equal(patch[3]['login-by'], 'http-chap,http-pap,mac');
+  assert.equal(patch[3]['mac-auth-mode'], 'mac-as-username');
+  assert.equal('mac-auth-password' in patch[3], false);
+});
+
+test('configureHotspotProfile: macCookie adds mac-cookie; an explicit loginBy still wins', async () => {
+  const menus = { '/ip/hotspot/profile': [{ '.id': '*0', name: 'default' }] };
+  const calls = [];
+  await configureHotspotProfile(stubRouter(menus, calls), { macCookie: true });
+  assert.equal(calls[0][3]['login-by'], 'mac-cookie,http-chap,http-pap,mac');
+  assert.equal(calls[0][3]['mac-auth-mode'], 'mac-as-username');
+  const calls2 = [];
+  await configureHotspotProfile(stubRouter(menus, calls2), { loginBy: 'http-pap,mac' });
+  assert.equal(calls2[0][3]['login-by'], 'http-pap,mac');
+});
+
+test('loginByFor follows the hotspot_mac_cookie setting (default off)', () => {
+  const dbWith = (value) => ({ prepare: () => ({ get: () => (value == null ? undefined : { value }) }) });
+  assert.equal(loginByFor(dbWith(null)), 'http-chap,http-pap,mac');
+  assert.equal(loginByFor(dbWith('0')), 'http-chap,http-pap,mac');
+  assert.equal(loginByFor(dbWith('1')), 'mac-cookie,http-chap,http-pap,mac');
+  assert.equal(loginByFor(dbWith('true')), 'mac-cookie,http-chap,http-pap,mac');
+});
+
+test('verifyConfig: mac-auth-mode must be mac-as-username; mac-cookie mismatch is only a warning', async () => {
+  const containerIp = '10.0.0.5';
+  const serverHost = 'wifi.example.com';
+  const run = async (prof, opts = {}) => {
+    const fx = verifyFixtures({ containerIp, serverHost });
+    fx['/ip/hotspot/profile'] = [{ ...fx['/ip/hotspot/profile'][0], ...prof }];
+    const router = { list: async (menu) => fx[menu], call: async () => ({ status: 'finished' }) };
+    return verifyCfg2(router, { containerIp, serverHost, ...opts });
+  };
+  const find = (res, prefix) => res.checks.find((c) => c.component.startsWith(prefix));
+
+  const bad = await run({ 'mac-auth-mode': 'mac-as-username-and-password' });
+  const mode = find(bad, 'Hotspot profile mac-auth-mode');
+  assert.equal(mode.status, 'fail');
+  assert.equal(mode.required, true);
+  assert.match(mode.hint, /profile set default mac-auth-mode=mac-as-username/);
+  assert.equal(bad.ok, false);
+
+  const good = await run({});
+  assert.equal(find(good, 'Hotspot profile mac-auth-mode').status, 'pass');
+  assert.equal(find(good, 'Hotspot MAC cookies').status, 'pass');
+
+  // Cookie on the router but the setting is off -> non-required warning.
+  const extra = await run({ 'login-by': 'mac-cookie,http-chap,http-pap,mac' });
+  const w = find(extra, 'Hotspot MAC cookies');
+  assert.equal(w.status, 'fail');
+  assert.equal(w.required, false);
+  assert.match(w.detail, /turn "Use MAC cookies" on/);
+  assert.equal(extra.ok, true);
+
+  // Setting on but the router lacks mac-cookie -> warning the other way.
+  const missing = await run({}, { macCookie: true });
+  const w2 = find(missing, 'Hotspot MAC cookies');
+  assert.equal(w2.status, 'fail');
+  assert.equal(w2.required, false);
+  assert.match(w2.detail, /lacks mac-cookie/);
+  assert.equal((await run({ 'login-by': 'mac-cookie,http-chap,http-pap,mac' }, { macCookie: true })).checks
+    .find((c) => c.component.startsWith('Hotspot MAC cookies')).status, 'pass');
 });
 
 test('ensureDnsRemoteRequests patches the single /ip/dns object only when off', async () => {

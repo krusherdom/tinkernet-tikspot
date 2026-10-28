@@ -62,6 +62,21 @@ export function syncUser(db, { username, password, groupname, enabled = true }) 
   }
 }
 
+// Project a remembered device (MAC re-auth) as a RADIUS user: username = MAC
+// (canonical AA:BB:CC:DD:EE:FF). RouterOS login-by=mac with
+// mac-auth-mode=mac-as-username sends an EMPTY User-Password, so there is no
+// password row — `Auth-Type := Accept` short-circuits authentication and the
+// user's plan group supplies the reply attributes. Idempotent.
+export function syncMacUser(db, { mac, groupname }) {
+  removeUser(db, mac);
+  db.prepare(
+    "INSERT INTO radcheck (username, attribute, op, value) VALUES (?, 'Auth-Type', ':=', 'Accept')",
+  ).run(mac);
+  if (groupname) {
+    db.prepare('INSERT INTO radusergroup (username, groupname, priority) VALUES (?, ?, 1)').run(mac, groupname);
+  }
+}
+
 // Remove a username entirely from the RADIUS tables.
 export function removeUser(db, username) {
   db.prepare('DELETE FROM radcheck WHERE username = ?').run(username);

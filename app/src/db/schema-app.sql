@@ -3,7 +3,7 @@
 -- sync layer (radius/sync.js) projects them into the RADIUS tables so FreeRADIUS
 -- stays the single auth authority.
 --
--- Tables: app_meta, plans, settings, vouchers, accounts, mac_sessions, designs,
+-- Tables: app_meta, plans, settings, vouchers, accounts, user_devices, designs,
 -- admin_audit, assets, events, announcements.
 
 CREATE TABLE IF NOT EXISTS app_meta (
@@ -71,23 +71,29 @@ CREATE TABLE IF NOT EXISTS accounts (
 	created_at           TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- Remembered devices for MAC re-auth. When a user logs in on a mac_remember plan,
--- the grant processor records their MAC here AND as a RADIUS user (username = MAC,
--- Cleartext-Password = MAC, with an Expiration check item) so a returning device
--- (MikroTik login-by=mac) auto-authenticates until the validity window closes.
-CREATE TABLE IF NOT EXISTS mac_sessions (
-	id                   INTEGER PRIMARY KEY AUTOINCREMENT,
-	mac                  TEXT NOT NULL UNIQUE,
-	identity             TEXT,
-	plan_id              INTEGER REFERENCES plans(id) ON DELETE SET NULL,
-	rate_limit           TEXT,
-	total_limit_bytes    INTEGER,
-	session_timeout_secs INTEGER,
-	granted_at           TEXT NOT NULL DEFAULT (datetime('now')),
-	expires_at           TEXT NOT NULL,
-	active               INTEGER NOT NULL DEFAULT 1
+-- Remembered devices for MAC re-auth (0.18). Each client MAC is remembered
+-- against the USER that logged in (voucher code / account username / plugin
+-- guest pg-*). An active row is mirrored as a RADIUS user (username = MAC,
+-- radcheck Auth-Type := Accept, radusergroup = the user's plan group) so the
+-- router's login-by=mac (mac-as-username, empty password) silently re-admits the
+-- device until expires_at. One active owner per MAC (partial unique index).
+-- expires_at is SQLite 'YYYY-MM-DD HH:MM:SS' UTC. Inactive rows are purged 7 days
+-- after expiry by the retention sweep. Replaces the pre-0.18 mac_sessions table.
+CREATE TABLE IF NOT EXISTS user_devices (
+	id         INTEGER PRIMARY KEY AUTOINCREMENT,
+	username   TEXT NOT NULL,
+	mac        TEXT NOT NULL,
+	plan_id    INTEGER REFERENCES plans(id) ON DELETE SET NULL,
+	groupname  TEXT,
+	source     TEXT NOT NULL DEFAULT 'session', -- session | grant | legacy
+	first_seen TEXT NOT NULL DEFAULT (datetime('now')),
+	last_seen  TEXT NOT NULL DEFAULT (datetime('now')),
+	expires_at TEXT NOT NULL,
+	active     INTEGER NOT NULL DEFAULT 1
 );
-CREATE INDEX IF NOT EXISTS mac_sessions_active ON mac_sessions(active, expires_at);
+CREATE INDEX IF NOT EXISTS user_devices_username ON user_devices(username);
+CREATE INDEX IF NOT EXISTS user_devices_active ON user_devices(active, expires_at);
+CREATE UNIQUE INDEX IF NOT EXISTS user_devices_active_mac ON user_devices(mac) WHERE active = 1;
 
 -- Saved captive-portal page designs. `grapes_json` holds the PUBLISHED design
 -- model JSON (theme + blocks + per-page block lists) that the live portal

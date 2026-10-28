@@ -26,7 +26,7 @@ import backupRoutes from './admin/backup.js';
 import settingsRoutes from './admin/settingsRoutes.js';
 import announcementRoutes from './admin/announcements.js';
 import pluginRoutes from './admin/plugins.js';
-import { processMacGrants, sweepMacSessions } from './mac/grants.js';
+import { processDeviceCapture, sweepDevices } from './mac/devices.js';
 import { sweepVouchers } from './voucher/sweeper.js';
 import { sweepMidnightExpiry } from './radius/midnight.js';
 import { sweepRetention } from './admin/retention.js';
@@ -138,14 +138,14 @@ await app.register(announcementRoutes);
 await app.register(pluginRoutes);
 await app.register(portalRoutes);
 
-// Background sweeps: MAC re-auth grants/expiry, date-gated voucher windows,
+// Background sweeps: remembered-device capture/expiry (MAC re-auth), date-gated voucher windows,
 // midnight-expiry plans, and daily log retention. Each sweep runs in its own
 // try so one failure can't starve the others; failures are recorded as events
 // (throttled per sweep so a persistent fault doesn't flood the log).
 const SWEEP_INTERVAL_MS = Number(process.env.TIKSPOT_MAC_INTERVAL_MS ?? 20000);
 const SWEEPS = [
-  ['mac-grants', () => processMacGrants(db)],
-  ['mac-expiry', () => sweepMacSessions(db)],
+  ['devices', () => processDeviceCapture(db)],
+  ['device-expiry', () => sweepDevices(db)],
   ['vouchers', () => sweepVouchers(db)],
   ['midnight', () => sweepMidnightExpiry(db, app.log)],
   ['retention', () => sweepRetention(db, app.log)],

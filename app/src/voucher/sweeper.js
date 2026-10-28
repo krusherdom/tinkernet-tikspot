@@ -1,9 +1,11 @@
 // Date-gated vouchers: enable a voucher's RADIUS credential only while it is
 // inside its [valid_from, valid_until] window, and expire it afterwards. Mirrors
-// the MAC re-auth sweeper (app/src/mac/grants.js) and runs on the same interval.
+// the remembered-devices sweeper (app/src/mac/devices.js) and runs on the same
+// interval. An expired voucher's remembered devices are forgotten with it.
 // Time comes from the container clock, which is the MikroTik host clock.
 
 import { syncUser, removeUser } from '../radius/sync.js';
+import { forgetUserDevices } from '../mac/devices.js';
 
 function hasCred(db, code) {
   return !!db.prepare('SELECT 1 FROM radcheck WHERE username = ? LIMIT 1').get(code);
@@ -29,6 +31,7 @@ export function sweepVouchers(db) {
       if (v.afterEnd) {
         if (hasCred(db, v.code)) removeUser(db, v.code);
         db.prepare("UPDATE vouchers SET status = 'expired' WHERE id = ?").run(v.id);
+        forgetUserDevices(db, v.code);
         changed++;
       } else if (v.beforeStart) {
         // not yet valid — make sure no credential exists
