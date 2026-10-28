@@ -82,7 +82,7 @@
               : userLink(s.username) + (s.owner && s.owner !== s.username ? ' <span class="muted">(device of ' + userLink(s.owner) + ')</span>' : '');
             var forgets = !!(s.owner || s.by_mac);
             return '<tr><td class="mono">' + who + '</td><td class="mono">' + esc(s.mac || '—') +
-              '</td><td class="mono">' + esc(s.ip || '—') + '</td><td>' + esc(s.acctstarttime || '—') +
+              '</td><td class="mono">' + esc(s.ip || '—') + '</td><td>' + esc(sqlLocal(s.acctstarttime) || '—') +
               '</td><td>' + octets(s.total_octets) + '</td><td><button class="btn sm danger" data-kick="' +
               esc(s.acctsessionid) + '"' + (forgets ? ' title="Disconnects the session and forgets the remembered device"' : '') + '>' +
               (forgets ? 'Kick &amp; forget' : 'Kick') + '</button></td></tr>';
@@ -91,7 +91,7 @@
       var usageRows = usage.length
         ? usage.map(function (u) {
             return '<tr><td class="mono">' + userLink(u.username) + '</td><td>' + u.sessions + '</td><td>' +
-              octets(u.total_octets) + '</td><td>' + esc(u.last_start || '—') + '</td></tr>';
+              octets(u.total_octets) + '</td><td>' + esc(sqlLocal(u.last_start) || '—') + '</td></tr>';
           }).join('')
         : '<tr><td colspan="4" class="empty">No usage recorded yet.</td></tr>';
       view.innerHTML =
@@ -587,7 +587,7 @@
   function renderLogsAuth(body) {
     api('/api/logs/auth').then(function (r) {
       var rows = r.attempts.length ? r.attempts.map(function (a) {
-        return '<tr><td class="muted">' + esc(a.authdate || '') + '</td><td class="mono">' + esc(a.username) + '</td><td><span class="pill ' + (a.accept ? 'on">accept' : 'off">reject') + '</span></td></tr>';
+        return '<tr><td class="muted">' + esc(sqlLocal(a.authdate) || '') + '</td><td class="mono">' + esc(a.username) + '</td><td><span class="pill ' + (a.accept ? 'on">accept' : 'off">reject') + '</span></td></tr>';
       }).join('') : '<tr><td colspan="3" class="empty">No RADIUS attempts logged yet — connect a client through the hotspot, or run a test login.</td></tr>';
       body.innerHTML =
         '<p class="sub">Recent RADIUS authentication attempts (from FreeRADIUS). Use this to confirm the router is actually reaching Tikspot.</p>' +
@@ -601,7 +601,7 @@
   function renderLogsAdmin(body) {
     api('/api/logs/admin').then(function (r) {
       var rows = r.entries.length ? r.entries.map(function (a) {
-        return '<tr><td class="muted">' + esc(a.created_at || '') + '</td><td class="mono">' + esc(a.action) + '</td><td>' + esc(a.detail || '') + '</td><td class="muted">' + esc(a.ip || '') + '</td></tr>';
+        return '<tr><td class="muted">' + esc(sqlLocal(a.created_at) || '') + '</td><td class="mono">' + esc(a.action) + '</td><td>' + esc(a.detail || '') + '</td><td class="muted">' + esc(a.ip || '') + '</td></tr>';
       }).join('') : '<tr><td colspan="4" class="empty">No admin actions recorded yet.</td></tr>';
       body.innerHTML = '<p class="sub">A record of state-changing admin actions on this device.</p>' +
         '<div class="card"><table><thead><tr><th>Time</th><th>Action</th><th>Detail</th><th>From</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
@@ -619,7 +619,7 @@
         var events = r.events || [];
         var rows = events.length ? events.map(function (e) {
           var pc = e.level === 'error' ? 'off' : e.level === 'warn' ? 'warn' : 'on';
-          var row = '<tr class="ev-row" data-id="' + e.id + '"><td class="muted">' + esc(e.created_at || '') + '</td>' +
+          var row = '<tr class="ev-row" data-id="' + e.id + '"><td class="muted">' + esc(sqlLocal(e.created_at) || '') + '</td>' +
             '<td><span class="pill ' + pc + '">' + esc(e.level) + '</span></td>' +
             '<td class="mono">' + esc(e.source) + '</td><td>' + esc(e.message) + '</td></tr>';
           if (e.detail) row += '<tr class="ev-detail" data-detail-for="' + e.id + '" hidden><td colspan="4"><pre class="cfg">' +
@@ -977,7 +977,7 @@
         ? designs.map(function (d) {
             var live = d.is_active ? '<span class="pill on">live</span>' : '';
             var draft = d.has_draft ? '<span class="pill scheduled">draft</span>' : '<span class="muted">—</span>';
-            var when = (d.updated_at || '').replace('T', ' ').slice(0, 16);
+            var when = sqlLocal(d.updated_at);
             var ver = d.version ? 'v' + d.version : '<span class="muted">unpublished</span>';
             return '<tr><td>' + esc(d.name) + ' ' + live + '</td><td class="mono">' + ver + '</td><td>' +
               draft + '</td><td class="muted">' + esc(when || '—') + '</td><td>' +

@@ -110,6 +110,15 @@
     });
   }
   function clone(o) { return JSON.parse(JSON.stringify(o)); }
+  // SQLite UTC datetime (or ISO) -> 'YYYY-MM-DD HH:MM' in the browser's local time.
+  function localStamp(s) {
+    if (!s) return '';
+    if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(s)) s = s.replace(' ', 'T') + 'Z';
+    var d = new Date(s);
+    if (isNaN(d.getTime())) return String(s);
+    function p(n) { return (n < 10 ? '0' : '') + n; }
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+  }
   function newId() { return 'b' + Date.now().toString(36) + (uid++).toString(36); }
   function $(id) { return document.getElementById(id); }
 
@@ -1200,7 +1209,7 @@
         return '<button class="ed-drow' + (d.id === design.id ? ' is-on' : '') + '" data-open="' + d.id + '">' +
           '<b>' + esc(d.name) + '</b>' + (d.is_active ? '<span class="ed-pill is-live">live</span>' : '') +
           (d.has_draft ? '<span class="ed-pill">draft</span>' : '') +
-          '<span class="ed-drow__meta">v' + (d.version || 1) + ' · ' + esc((d.updated_at || '').slice(0, 16).replace('T', ' ')) + '</span></button>';
+          '<span class="ed-drow__meta">v' + (d.version || 1) + ' · ' + esc(localStamp(d.updated_at)) + '</span></button>';
       }).join('') : '<div class="ed-hint">No designs yet.</div>') + '</div>';
       body.querySelectorAll('[data-open]').forEach(function (b) {
         b.onclick = function () { closeModal(); openDesign(b.dataset.open); };
@@ -1292,7 +1301,7 @@
       var vs = r.versions || [];
       menu.innerHTML = vs.length ? vs.map(function (v) {
         return '<div class="ed-vrow"><span>v' + v.version + '</span>' +
-          '<span class="ed-vrow__at">' + esc((v.created_at || '').slice(0, 16).replace('T', ' ')) + '</span>' +
+          '<span class="ed-vrow__at">' + esc(localStamp(v.created_at)) + '</span>' +
           '<button data-rev="' + v.version + '">Revert</button></div>';
       }).join('') : '<div class="ed-hint ed-hint--pad">No published versions yet.</div>';
       menu.querySelectorAll('[data-rev]').forEach(function (b) {
