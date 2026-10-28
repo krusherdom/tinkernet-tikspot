@@ -71,6 +71,61 @@ test('engine: clockSkewSecs comes from the first Date header, only with diagnost
   assert.equal(noHdr.clockSkewSecs, undefined);
 });
 
+// 0.17.3: a failed login/discover names its stage and HTTP status instead of
+// disappearing into a bare "upstream" (the live site lost a day to a rotated
+// agent password that the log could not distinguish from an RMS outage).
+const authRecipe = () => ({
+  ...recipe(),
+  auth: {
+    url: 'https://pms.example/authToken',
+    method: 'POST',
+    bodyJson: { agentPassword: '{{secret.agentPassword}}' },
+    tokenPath: 'token',
+    discover: { url: 'https://pms.example/clientUrl/1', param: 'baseUrl' },
+  },
+  secretKeys: ['agentPassword'],
+  secrets: { agentPassword: 'pw' },
+});
+const httpAuth = ({ discover = { status: 200, text: 'https://pms.example' }, auth = { status: 200, text: '{"token":"t"}' }, rows = [row] } = {}) =>
+  async (req) => {
+    if (/clientUrl/.test(req.url)) return { ...discover, headers: {}, ms: 1 };
+    if (/authToken/.test(req.url)) return { ...auth, headers: {}, ms: 1 };
+    return { status: 200, headers: {}, text: body(rows), ms: 1 };
+  };
+
+test('engine: a rejected login reports stage "auth" with the HTTP status and an auth step', async () => {
+  const r = await runLookup({ recipe: authRecipe(), inputs: inputsFor('101', 'Smith'), now, http: httpAuth({ auth: { status: 401, text: '{"message":"bad"}' } }), tokenCache: makeTokenCache(), diagnostics: true });
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, 'upstream');
+  assert.equal(r.detail, 'auth');
+  assert.equal(r.status, 401);
+  assert.deepEqual(r.steps.map((s) => `${s.name}:${s.status}`), ['discover:ok', 'auth:error']);
+
+  const noToken = await runLookup({ recipe: authRecipe(), inputs: inputsFor('101', 'Smith'), now, http: httpAuth({ auth: { status: 200, text: '{"nope":1}' } }), tokenCache: makeTokenCache(), diagnostics: true });
+  assert.equal(noToken.detail, 'auth-no-token');
+  assert.equal(noToken.status, undefined);
+
+  const disc = await runLookup({ recipe: authRecipe(), inputs: inputsFor('101', 'Smith'), now, http: httpAuth({ discover: { status: 404, text: '' } }), tokenCache: makeTokenCache(), diagnostics: true });
+  assert.equal(disc.detail, 'discover');
+  assert.equal(disc.status, 404);
+  assert.deepEqual(disc.steps.map((s) => `${s.name}:${s.status}`), ['discover:error']);
+
+  const ok = await runLookup({ recipe: authRecipe(), inputs: inputsFor('101', 'Smith'), now, http: httpAuth(), tokenCache: makeTokenCache(), diagnostics: true });
+  assert.equal(ok.ok, true);
+  assert.deepEqual(ok.steps.map((s) => `${s.name}:${s.status}`), ['discover:ok', 'auth:ok', 'main:ok']);
+});
+
+test('describeOutcome: login/discover failures are named, guest-facing text stays generic', () => {
+  const t = (result) => describeOutcome(result, { room: '101', name: 'Smith' }, 'RMS Cloud');
+  const rej = t({ ok: false, reason: 'upstream', detail: 'auth', status: 401 });
+  assert.equal(rej.level, 'warn');
+  assert.equal(rej.message, "Lookup refused: room 101 / name Smith — guest system rejected the login (HTTP 401) — check the plugin's stored credentials (plugin RMS Cloud)");
+  assert.match(t({ ok: false, reason: 'upstream', detail: 'auth-no-token' }).message, /login gave no usable token \(token missing from the response\)/);
+  assert.match(t({ ok: false, reason: 'upstream', detail: 'discover', status: 404 }).message, /guest system discovery failed \(HTTP 404\) — check the client id/);
+  // A plain step failure is unchanged.
+  assert.match(t({ ok: false, reason: 'upstream', status: 500 }).message, /guest system error \(HTTP 500\)/);
+});
+
 test('describeOutcome: one readable line per outcome, typed inputs first', () => {
   const typed = { room: '101', name: 'Smith' };
   const t = (result) => describeOutcome(result, typed, 'RMS Cloud');

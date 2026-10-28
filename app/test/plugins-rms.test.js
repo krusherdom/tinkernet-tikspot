@@ -244,7 +244,9 @@ test('RMS Cloud: a wrong client ID fails discovery -> upstream (no token request
   const recipe = validate(loadRmsRecipe('rms-cloud-surname-room.json', { ...GOOD_SECRETS, clientId: '99999' }));
   const before_ = await authTokenCallCount();
   const result = await runLookup({ recipe, inputs: inputsFor(recipe, { room: '101', name: 'Bennett' }), now: Date.now(), http: httpRequest, tokenCache: makeTokenCache() });
-  assert.deepEqual(result, { ok: false, reason: 'upstream' });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'upstream');
+  assert.equal(result.detail, 'discover');
   assert.equal(await authTokenCallCount(), before_);
 });
 

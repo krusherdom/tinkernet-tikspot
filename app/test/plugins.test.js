@@ -540,7 +540,10 @@ test('runLookup: auth failure (wrong credentials) maps to upstream', async () =>
     http,
     tokenCache: makeTokenCache(),
   });
-  assert.deepEqual(result, { ok: false, reason: 'upstream' });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'upstream');
+  assert.equal(result.detail, 'auth');
+  assert.equal(result.status, 401);
 });
 
 test('runLookup: a thrown TIMEOUT error maps to reason "timeout"', async () => {
@@ -687,5 +690,8 @@ test('integration (hotel-json): wrong password -> upstream', async () => {
     http: httpRequest,
     tokenCache: makeTokenCache(),
   });
-  assert.deepEqual(result, { ok: false, reason: 'upstream' });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'upstream');
+  assert.equal(result.detail, 'auth');
+  assert.equal(result.status, 401);
 });

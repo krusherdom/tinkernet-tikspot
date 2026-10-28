@@ -121,10 +121,16 @@ Lookup OK: room 101 / name Smith → Jane Smith · room 101 (plugin RMS Cloud)
 Lookup refused: room 101 / name Smith — details did not match any of 3 records (plugin RMS Cloud)
 Lookup refused: room 101 / name Smith — no booking found (search returned 0 records) (plugin RMS Cloud)
 Lookup refused: room 101 / name Smith — found, but outside the stay window (ended; 2026-10-01 10:00 → 2026-10-03 10:00) (plugin RMS Cloud)
-Lookup refused: room 101 / name Smith — guest system error (HTTP 401) (plugin RMS Cloud)
+Lookup refused: room 101 / name Smith — guest system rejected the login (HTTP 401) — check the plugin's stored credentials (plugin RMS Cloud)
+Lookup refused: room 101 / name Smith — guest system error (HTTP 500) (plugin RMS Cloud)
 ```
 
-The three refusals mean different things: *did not match any of N records* is a typo or a
+*Rejected the login* (and *discovery failed*) means the recipe's `auth` step failed before any
+booking search ran — a rotated API password or wrong client id, not a guest typo. Re-enter the
+secrets on the plugin and use **Test lookup**, whose step list now shows `discover`, `auth` and
+the search steps separately. Guests only ever see the generic "guest system" message.
+
+The three booking refusals mean different things: *did not match any of N records* is a typo or a
 different surname on the booking; *search returned 0 records* means the guest system's own
 filters excluded everything, so the typed details were never compared — check the recipe's
 search filters and the router clock; *outside the stay window* means the booking was found

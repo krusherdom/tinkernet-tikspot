@@ -248,20 +248,24 @@ async function fetchToken(recipe, http, tokenCache, nowMs, inputs, forceRefresh)
     insecureTls: !!recipe.allowInsecureTls,
   });
 
+  // AUTH-coded errors carry `stage: 'auth'` (+ the HTTP status when the guest
+  // system answered) so the lookup result and the event log can say "the
+  // guest system rejected the login (HTTP 401)" instead of a bare upstream
+  // error — the first thing to check after a credential rotation.
   if (res.status < 200 || res.status >= 300) {
-    throw Object.assign(new Error(`auth failed with status ${res.status}`), { code: 'AUTH' });
+    throw Object.assign(new Error(`auth failed with status ${res.status}`), { code: 'AUTH', stage: 'auth', status: res.status });
   }
 
   let json;
   try {
     json = JSON.parse(res.text);
   } catch {
-    throw Object.assign(new Error('auth response was not valid JSON'), { code: 'AUTH' });
+    throw Object.assign(new Error('auth response was not valid JSON'), { code: 'AUTH', stage: 'auth', detail: 'auth-parse' });
   }
 
   const token = getPath(json, authCfg.tokenPath || 'token');
   if (!token) {
-    throw Object.assign(new Error(`token not found at "${authCfg.tokenPath || 'token'}"`), { code: 'AUTH' });
+    throw Object.assign(new Error(`token not found at "${authCfg.tokenPath || 'token'}"`), { code: 'AUTH', stage: 'auth', detail: 'auth-no-token' });
   }
 
   if (tokenCache && typeof tokenCache.set === 'function') {
@@ -318,7 +322,7 @@ async function resolveDiscoveredParams(recipe, http, tokenCache, nowMs, inputs) 
     insecureTls: !!recipe.allowInsecureTls,
   });
   if (res.status < 200 || res.status >= 300) {
-    throw Object.assign(new Error(`discover failed with status ${res.status}`), { code: 'AUTH' });
+    throw Object.assign(new Error(`discover failed with status ${res.status}`), { code: 'AUTH', stage: 'discover', status: res.status });
   }
 
   let value;
@@ -328,7 +332,7 @@ async function resolveDiscoveredParams(recipe, http, tokenCache, nowMs, inputs) 
     try {
       json = JSON.parse(text);
     } catch {
-      throw Object.assign(new Error('discover response was not valid JSON'), { code: 'AUTH' });
+      throw Object.assign(new Error('discover response was not valid JSON'), { code: 'AUTH', stage: 'discover', detail: 'discover-parse' });
     }
     value = getPath(json, discover.path);
   } else {
@@ -345,7 +349,7 @@ async function resolveDiscoveredParams(recipe, http, tokenCache, nowMs, inputs) 
   }
   value = value == null ? '' : String(value).trim().replace(/\/+$/, '');
   if (!/^https?:\/\/\S+$/i.test(value)) {
-    throw Object.assign(new Error(`discover did not return an http(s) URL for "${discover.param}"`), { code: 'AUTH' });
+    throw Object.assign(new Error(`discover did not return an http(s) URL for "${discover.param}"`), { code: 'AUTH', stage: 'discover', detail: 'discover-no-url' });
   }
 
   if (tokenCache && typeof tokenCache.set === 'function') {
@@ -555,18 +559,27 @@ async function runHttpLookup({ recipe, inputs = [], now, http: rawHttp = default
   let token = '';
   let tokenFromCache = false;
   if (recipe.auth) {
+    const t0 = Date.now();
     try {
-      const t0 = Date.now();
       const discovered = await resolveDiscoveredParams(recipe, http, tokenCache, nowMs, inputs);
       recipe = discovered.recipe; // patched paramValues apply to auth + every step below
       if (!discovered.skipped) {
         stepDiag.push({ name: 'discover', status: 'ok', ms: Date.now() - t0, records: 0, cached: discovered.cached });
       }
+      const t1 = Date.now();
       const res = await fetchToken(recipe, http, tokenCache, nowMs, inputs, false);
       token = res.token;
       tokenFromCache = res.fromCache;
+      stepDiag.push({ name: 'auth', status: 'ok', ms: Date.now() - t1, records: 0, cached: res.fromCache });
     } catch (e) {
-      return done({ ok: false, reason: reasonForError(e) });
+      // Name the stage that failed ('discover' or 'auth') so the admin Test
+      // panel / event log can point at credentials rather than "the guest
+      // system". Timeouts keep their own reason.
+      const stage = (e && e.stage) || 'auth';
+      stepDiag.push({ name: stage, status: 'error', ms: Date.now() - t0, records: 0 });
+      const out = { ok: false, reason: reasonForError(e), detail: (e && e.detail) || stage };
+      if (e && e.status) out.status = e.status;
+      return done(out);
     }
   }
 

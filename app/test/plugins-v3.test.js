@@ -681,7 +681,9 @@ test('engine: auth.discover failure (non-2xx or non-URL body) -> upstream, no to
   for (const opts of [{ status: 404 }, { body: 'not a url' }, { body: '' }]) {
     const log = [];
     const r = await runLookup({ recipe: validated(discoverRecipe()), inputs: { room: '101' }, http: discoverHttp(log, opts), tokenCache: makeTokenCache() });
-    assert.deepEqual(r, { ok: false, reason: 'upstream' }, JSON.stringify(opts));
+    assert.equal(r.ok, false, JSON.stringify(opts));
+    assert.equal(r.reason, 'upstream', JSON.stringify(opts));
+    assert.match(String(r.detail), /^discover/, JSON.stringify(opts));
     assert.equal(log.length, 1, 'only the discover call should have been made');
   }
 });

@@ -1859,10 +1859,16 @@
       cls = r.reason === 'no-match' || r.reason === 'outside-window' ? 'warn' : 'fail';
       var labels = { 'no-match': 'No matching booking', 'outside-window': 'Found, but outside the stay window',
         upstream: 'Guest system error', timeout: 'Timed out' };
-      head = labels[r.reason] || ('Failed' + (r.reason ? ' (' + esc(r.reason) + ')' : ''));
+      var authFail = r.detail === 'auth' || r.detail === 'auth-parse' || r.detail === 'auth-no-token';
+      var discoverFail = r.detail === 'discover' || r.detail === 'discover-parse' || r.detail === 'discover-no-url';
+      if (authFail) head = r.status ? 'Guest system rejected the login' : 'Guest system login gave no usable token';
+      else if (discoverFail) head = 'Guest system discovery failed';
+      else head = labels[r.reason] || ('Failed' + (r.reason ? ' (' + esc(r.reason) + ')' : ''));
       if (r.status) head += ' <span class="muted">HTTP ' + esc(String(r.status)) + '</span>';
       var detailText = r.detail === 'no-candidates' ? 'the search returned no records at all — the guest system filtered everything out (check its filters, and the clock below)'
         : r.detail === 'no-record-matched' ? 'records came back, but none matched the typed details'
+        : authFail ? 'the login (auth) request failed before any booking search ran — re-enter the stored secrets (e.g. agent / client passwords) and save, then test again'
+        : discoverFail ? 'the discover request (before login) failed — check the client id and the seed URL'
         : r.detail;
       if (detailText) head += '<div class="muted tr-detail">' + esc(detailText) + '</div>';
     }

@@ -96,9 +96,23 @@ export function describeOutcome(result, typed, pluginName) {
       level = 'warn';
       why = 'guest system timed out';
       break;
-    default:
+    default: {
       level = 'warn';
-      why = result.status ? `guest system error (HTTP ${result.status})` : `guest system error${result.detail ? ` (${result.detail})` : ''}`;
+      const d = result.detail;
+      const http = result.status ? ` (HTTP ${result.status})` : '';
+      // A failed login/discovery is a configuration problem (rotated
+      // credentials, wrong client id), so say so — the guest-facing page
+      // still only gets the generic "guest system" message.
+      if (d === 'auth' || d === 'auth-parse' || d === 'auth-no-token') {
+        why = result.status
+          ? `guest system rejected the login${http} — check the plugin's stored credentials`
+          : `guest system login gave no usable token (${d === 'auth-parse' ? 'response was not JSON' : 'token missing from the response'})`;
+      } else if (d === 'discover' || d === 'discover-parse' || d === 'discover-no-url') {
+        why = `guest system discovery failed${http}${d === 'discover' ? '' : ` (${d})`} — check the client id / seed URL`;
+      } else {
+        why = result.status ? `guest system error${http}` : `guest system error${d ? ` (${d})` : ''}`;
+      }
+    }
   }
   return { level, message: `Lookup refused: ${who} — ${why}${tail}` };
 }
