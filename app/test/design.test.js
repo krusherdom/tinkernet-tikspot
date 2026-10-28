@@ -3,6 +3,7 @@
 // just `node --test` (see unit.test.js's header comment for why that matters).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import {
   BLOCK_REGISTRY,
@@ -72,7 +73,7 @@ test('logout-button is scoped to the status page only', () => {
 
 test('STYLE_FIELDS and THEME_FIELDS cover the documented knobs', () => {
   const styleKeys = STYLE_FIELDS.map((f) => f.key).sort();
-  assert.deepEqual(styleKeys, ['align', 'bg', 'color', 'hidden', 'mb', 'mt']);
+  assert.deepEqual(styleKeys, ['align', 'bg', 'bold', 'color', 'fontSize', 'hidden', 'mb', 'mt']);
 
   const themeKeys = new Set(THEME_FIELDS.map((f) => f.key));
   for (const k of ['cardBg', 'textColor', 'bgImage', 'buttonStyle', 'logoPosition', 'accent', 'font', 'radius', 'width']) {
@@ -116,7 +117,7 @@ test('normalizeDesign fills style defaults and strips unknown props (e.g. dead m
   });
   const block = d.blocks[0];
   assert.equal(block.props.macRemember, undefined);
-  assert.deepEqual(block.props.style, { mt: 0, mb: 0, color: '', bg: '', align: '', hidden: false });
+  assert.deepEqual(block.props.style, { mt: 0, mb: 0, color: '', bg: '', align: '', fontSize: 0, bold: false, hidden: false });
 });
 
 test('normalizeDesign supplies default status/logout pages when absent, and normalises provided ones', () => {
@@ -330,4 +331,55 @@ test('an error with no owning block (router error, or plugin block not on the pa
 test('no error -> no error banner element, so the page never scrolls on a clean load', () => {
   const html = renderPortalPage(lookupDesign(), { plugins: LOOKUP_PLUGINS, linkLogin: 'http://router/login' });
   assert.ok(!html.includes('id="tk-error"'));
+});
+
+test('normalizeDesign clamps style.fontSize to an integer 0..48 and coerces bold', () => {
+  const d = normalizeDesign({
+    blocks: [
+      { id: 'a', type: 'text', props: { text: 'x', style: { fontSize: 99, bold: 'yes' } } },
+      { id: 'b', type: 'text', props: { text: 'y', style: { fontSize: 17.6, bold: true } } },
+      { id: 'c', type: 'text', props: { text: 'z', style: { fontSize: -3 } } },
+    ],
+  });
+  assert.equal(d.blocks[0].props.style.fontSize, 48);
+  assert.equal(d.blocks[0].props.style.bold, false);
+  assert.equal(d.blocks[1].props.style.fontSize, 18);
+  assert.equal(d.blocks[1].props.style.bold, true);
+  assert.equal(d.blocks[2].props.style.fontSize, 0);
+});
+
+test('block style colour/bold/size/background land on the wrapper; inner text carries no colour', () => {
+  const html = renderBlock(
+    { id: 't1', type: 'text', props: { text: 'Hello', style: { color: '#f00', bold: true, fontSize: 20, bg: '#eee' } } },
+    {},
+  );
+  const wrapper = html.match(/^<div class="([^"]*)"[^>]*style="([^"]*)"/);
+  assert.ok(wrapper, html);
+  const decls = wrapper[2];
+  for (const d of ['color:#f00', 'font-weight:700', 'font-size:20px', 'background:#eee', 'padding:10px 14px', 'border-radius:8px']) {
+    assert.ok(decls.includes(d), `wrapper style missing ${d}: ${decls}`);
+  }
+  assert.match(wrapper[1], /cp-block--fs/);
+  const p = html.match(/<p class="cp-text[^"]*"[^>]*>/)[0];
+  assert.doesNotMatch(p, /style=|color/);
+});
+
+test('heading: a non-zero style.fontSize overrides the heading size prop', () => {
+  const withSize = renderBlock({ id: 'h', type: 'heading', props: { text: 'Hi', size: 30, style: { fontSize: 22 } } }, {});
+  assert.match(withSize, /font-size:22px/);
+  assert.doesNotMatch(withSize, /font-size:30px/);
+  const plain = renderBlock({ id: 'h', type: 'heading', props: { text: 'Hi', size: 30 } }, {});
+  assert.match(plain, /<h1[^>]*style="font-size:30px"/);
+  assert.doesNotMatch(plain, /color/);
+});
+
+test('portal.css: heading/text/terms inherit colour (no hard-coded text colour)', () => {
+  const css = readFileSync(new URL('../src/portal/static/portal.css', import.meta.url), 'utf8');
+  for (const sel of ['.cp-heading {', '.cp-text {', '.cp-terms {']) {
+    const start = css.indexOf('\n' + sel);
+    assert.ok(start >= 0, `rule ${sel} not found`);
+    const rule = css.slice(start, css.indexOf('}', start));
+    assert.match(rule, /color: inherit/, sel);
+    assert.doesNotMatch(rule, /color: #/, sel);
+  }
 });

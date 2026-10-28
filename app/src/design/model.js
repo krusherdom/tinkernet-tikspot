@@ -17,7 +17,7 @@ export const PAGES = ['login', 'status', 'logout'];
 
 // Common per-block style knobs (props.style on every block). Rendered by
 // styleAttrs() in portal/widgets.js.
-export const STYLE_DEFAULTS = { mt: 0, mb: 0, color: '', bg: '', align: '', hidden: false };
+export const STYLE_DEFAULTS = { mt: 0, mb: 0, color: '', bg: '', align: '', fontSize: 0, bold: false, hidden: false };
 
 export const STYLE_FIELDS = [
   { key: 'mt', kind: 'slider', label: 'Space above', min: 0, max: 64, step: 2, unit: 'px' },
@@ -25,6 +25,8 @@ export const STYLE_FIELDS = [
   { key: 'color', kind: 'color', label: 'Text colour' },
   { key: 'bg', kind: 'color', label: 'Background' },
   { key: 'align', kind: 'align', label: 'Alignment' },
+  { key: 'fontSize', kind: 'slider', label: 'Font size', min: 0, max: 48, step: 1, unit: 'px', hint: '0 = theme default.' },
+  { key: 'bold', kind: 'switch', label: 'Bold' },
   { key: 'hidden', kind: 'switch', label: 'Hidden', hint: 'Kept in the design but not shown on the live page.' },
 ];
 
@@ -307,6 +309,8 @@ function normalizeStyle(raw) {
     color: typeof r.color === 'string' ? r.color : STYLE_DEFAULTS.color,
     bg: typeof r.bg === 'string' ? r.bg : STYLE_DEFAULTS.bg,
     align: ['left', 'center', 'right'].includes(r.align) ? r.align : STYLE_DEFAULTS.align,
+    fontSize: Math.round(clampNum(r.fontSize, STYLE_DEFAULTS.fontSize, 0, 48)),
+    bold: r.bold === true,
     hidden: r.hidden === true,
   };
 }

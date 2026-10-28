@@ -84,7 +84,7 @@
           }).join('')
         : '<tr><td colspan="4" class="empty">No usage recorded yet.</td></tr>';
       view.innerHTML =
-        '<h1>Active users</h1><p class="sub">Live sessions from RADIUS accounting. Kick sends a CoA Disconnect to the router.</p>' +
+        '<h1>Active sessions</h1><p class="sub">Live sessions from RADIUS accounting. Kick sends a CoA Disconnect to the router.</p>' +
         '<div class="card"><table><thead><tr><th>User</th><th>MAC</th><th>IP</th><th>Started</th><th>Usage</th><th></th></tr></thead><tbody>' +
         rows + '</tbody></table></div>' +
         '<div class="card"><h2>Usage by user</h2><table><thead><tr><th>User</th><th>Sessions</th><th>Total</th><th>Last seen</th></tr></thead><tbody>' +
@@ -100,45 +100,90 @@
     }).catch(function (e) { toast(e.message, true); });
   };
 
-  tabs.plans = function () {
+  // The plan form is shared by "New plan" and per-row "Edit" (same fields, a
+  // different submit). Every limit field is sent on edit, so the row's values
+  // are what you see and what you save — blank = unlimited.
+  function planForm(p) {
+    var v = p || {};
+    var mbv = v.total_limit_bytes != null ? Math.round(v.total_limit_bytes / 1048576) : '';
+    var minv = v.session_timeout_secs != null ? Math.round(v.session_timeout_secs / 60) : '';
+    var daysv = v.mac_validity_secs != null ? Math.round(v.mac_validity_secs / 86400 * 10) / 10 : '';
+    var midnight = v.expiry_mode === 'midnight';
+    return '<div class="row">' +
+      field('p-name', 'Name', '<input id="p-name" placeholder="e.g. Day pass" value="' + esc(v.name || '') + '">') +
+      field('p-rate', 'Rate limit', '<input id="p-rate" placeholder="5M/5M" value="' + esc(v.rate_limit || '') + '">') +
+      field('p-data', 'Data (MB)', '<input id="p-data" type="number" placeholder="∞" value="' + mbv + '">') +
+      field('p-time', 'Time (min)', '<input id="p-time" type="number" placeholder="' + (midnight ? 'renews at midnight' : '∞') + '" value="' + minv + '"' + (midnight ? ' disabled' : '') + '>') +
+      field('p-expiry', 'Expiry', '<select id="p-expiry"><option value="fixed"' + (midnight ? '' : ' selected') + '>Fixed time</option><option value="midnight"' + (midnight ? ' selected' : '') + '>At midnight (daily)</option></select>') +
+      field('p-mac', 'Remember MAC', '<select id="p-mac"><option value="0"' + (v.mac_remember ? '' : ' selected') + '>no</option><option value="1"' + (v.mac_remember ? ' selected' : '') + '>yes</option></select>') +
+      field('p-macdays', 'MAC validity (days) ' + help('How long a remembered device is re-admitted without the portal. Blank = for as long as the login itself is valid.'),
+        '<input id="p-macdays" type="number" min="0" step="0.5" placeholder="login validity" value="' + daysv + '">') +
+      '</div>';
+  }
+  function planFormBody() {
+    var midnight = val('p-expiry') === 'midnight';
+    return {
+      name: val('p-name'), rate_limit: val('p-rate') || null,
+      total_limit_bytes: numOrNull('p-data', 1048576),
+      session_timeout_secs: midnight ? null : numOrNull('p-time', 60),
+      mac_remember: val('p-mac') === '1',
+      mac_validity_secs: numOrNull('p-macdays', 86400),
+      expiry_mode: val('p-expiry'),
+    };
+  }
+  function bindPlanForm() {
+    // "At midnight" replaces the fixed time limit, so disable the Time field for it.
+    var pExpiry = view.querySelector('#p-expiry');
+    if (!pExpiry) return;
+    pExpiry.onchange = function () {
+      var t = view.querySelector('#p-time');
+      t.disabled = pExpiry.value === 'midnight';
+      t.placeholder = pExpiry.value === 'midnight' ? 'renews at midnight' : '∞';
+    };
+  }
+
+  tabs.plans = function (editId) {
     api('/api/plans').then(function (r) {
+      var editing = editId != null ? r.plans.find(function (p) { return p.id === editId; }) : null;
       var rows = r.plans.map(function (p) {
-        var del = p.radius_groupname === 'free' ? '' :
-          '<button class="btn sm danger" data-del="' + p.id + '">Delete</button>';
-        return '<tr><td>' + esc(p.name) + '</td><td><span class="muted">' + esc(p.kind) + '</span></td><td>' +
-          planLimits(p) + '</td><td>' + (p.mac_remember ? 'yes' : 'no') + '</td><td>' + p.members + '</td><td>' + del + '</td></tr>';
+        var isFree = p.radius_groupname === 'free';
+        var btns = '<button class="btn sm" data-edit="' + p.id + '">Edit</button> ' +
+          (isFree ? '' : '<button class="btn sm danger" data-del="' + p.id + '">Delete</button>');
+        var macCol = p.mac_remember ? ('yes' + (p.mac_validity_secs != null ? ' <span class="muted">· ' + (Math.round(p.mac_validity_secs / 86400 * 10) / 10) + ' d</span>' : '')) : 'no';
+        return '<tr' + (editing && editing.id === p.id ? ' class="is-editing"' : '') + '><td>' + esc(p.name) + (isFree ? ' <span class="muted">(default)</span>' : '') +
+          '</td><td><span class="muted">' + esc(p.kind) + '</span></td><td>' +
+          planLimits(p) + '</td><td>' + macCol + '</td><td>' + p.members + '</td><td class="nowrap">' + btns + '</td></tr>';
       }).join('');
       view.innerHTML =
-        '<h1>Plans</h1><p class="sub">A plan = a set of MikroTik limits (speed / data / time). Vouchers and accounts attach to a plan.</p>' +
+        '<h1>Plans</h1><p class="sub">A plan = a set of MikroTik limits (speed / data / time). Vouchers, accounts and guest-lookup plugins attach to a plan. ' +
+        'The <b>Free</b> plan is the default for free login and for plugins that don\'t pick a plan — it can be edited but not deleted.</p>' +
         '<div class="card"><table><thead><tr><th>Name</th><th>Kind</th><th>Limits</th><th>MAC</th><th>Members</th><th></th></tr></thead><tbody>' +
         rows + '</tbody></table></div>' +
-        '<div class="card"><h2>New plan</h2><div class="row">' +
-        field('p-name', 'Name', '<input id="p-name" placeholder="e.g. Day pass">') +
-        field('p-rate', 'Rate limit', '<input id="p-rate" placeholder="5M/5M">') +
-        field('p-data', 'Data (MB)', '<input id="p-data" type="number" placeholder="∞">') +
-        field('p-time', 'Time (min)', '<input id="p-time" type="number" placeholder="∞">') +
-        field('p-expiry', 'Expiry', '<select id="p-expiry"><option value="fixed">Fixed time</option><option value="midnight">At midnight (daily)</option></select>') +
-        field('p-mac', 'Remember MAC', '<select id="p-mac"><option value="0">no</option><option value="1">yes</option></select>') +
-        '<button class="btn primary" id="p-add">Add plan</button></div></div>';
-      // "At midnight" replaces the fixed time limit, so disable the Time field for it.
-      var pExpiry = view.querySelector('#p-expiry');
-      pExpiry.onchange = function () {
-        var t = view.querySelector('#p-time');
-        t.disabled = pExpiry.value === 'midnight';
-        t.placeholder = pExpiry.value === 'midnight' ? 'renews at midnight' : '∞';
-      };
-      view.querySelector('#p-add').onclick = function () {
-        var midnight = val('p-expiry') === 'midnight';
-        var body = {
-          name: val('p-name'), rate_limit: val('p-rate') || null,
-          total_limit_bytes: numOrNull('p-data', 1048576),
-          session_timeout_secs: midnight ? null : numOrNull('p-time', 60),
-          mac_remember: val('p-mac') === '1',
-          expiry_mode: val('p-expiry'),
-        };
+        (editing
+          ? '<div class="card" id="p-editcard"><h2>Edit plan: ' + esc(editing.name) + '</h2>' + planForm(editing) +
+            '<div class="row" style="margin-top:10px"><button class="btn primary" id="p-save">Save changes</button> <button class="btn" id="p-cancel">Cancel</button>' +
+            '<span class="muted" style="margin-left:10px">Applies at each member\'s next login; running sessions keep their current limits.</span></div></div>'
+          : '<div class="card"><h2>New plan</h2>' + planForm(null) +
+            '<div class="row" style="margin-top:10px"><button class="btn primary" id="p-add">Add plan</button></div></div>');
+      bindPlanForm();
+      var add = view.querySelector('#p-add');
+      if (add) add.onclick = function () {
+        var body = planFormBody();
         if (!body.name) return toast('Name required', true);
         api('/api/plans', { method: 'POST', body: body }).then(function () { toast('Plan added'); tabs.plans(); }).catch(function (e) { toast(e.message, true); });
       };
+      var save = view.querySelector('#p-save');
+      if (save) save.onclick = function () {
+        var body = planFormBody();
+        if (!body.name) return toast('Name required', true);
+        api('/api/plans/' + editing.id, { method: 'PATCH', body: body })
+          .then(function () { toast('Saved — applies at next login'); tabs.plans(); }).catch(function (e) { toast(e.message, true); });
+      };
+      var cancel = view.querySelector('#p-cancel');
+      if (cancel) cancel.onclick = function () { tabs.plans(); };
+      view.querySelectorAll('[data-edit]').forEach(function (b) {
+        b.onclick = function () { tabs.plans(Number(b.dataset.edit)); };
+      });
       view.querySelectorAll('[data-del]').forEach(function (b) {
         b.onclick = function () {
           if (!confirm('Delete this plan?')) return;
@@ -156,8 +201,11 @@
       var win = (v.valid_from || v.valid_until)
         ? esc((v.valid_from || '').slice(0, 10) || '∞') + ' → ' + esc((v.valid_until || '').slice(0, 10) || '∞')
         : '<span class="muted">—</span>';
+      var batch = v.batch_id
+        ? '<a href="/api/vouchers/print?batch=' + encodeURIComponent(v.batch_id) + '" target="_blank" title="Print this batch\'s unused vouchers">' + esc(v.batch_id) + '</a>'
+        : '';
       return '<tr><td class="mono">' + esc(v.code) + '</td><td>' + esc(v.plan_name || '—') + '</td><td><span class="pill ' +
-        st + '">' + st + '</span></td><td class="muted">' + win + '</td><td class="muted">' + esc(v.batch_id || '') + '</td><td>' + rev + '</td></tr>';
+        st + '">' + st + '</span></td><td class="muted">' + win + '</td><td class="muted">' + batch + '</td><td>' + rev + '</td></tr>';
     }).join('');
   }
   function bindRevoke() {
@@ -184,7 +232,10 @@
         '<button class="btn primary" id="v-gen"' + (plans.length ? '' : ' disabled') + '>Generate</button></div>' +
         (plans.length ? '' : '<p class="muted" style="margin-top:10px">Create a plan first.</p>') +
         '<div id="v-out"></div></div>' +
-        '<div class="card"><table><thead><tr><th>Code</th><th>Plan</th><th>Status</th><th>Valid</th><th>Batch</th><th></th></tr></thead>' +
+        '<div class="card"><div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px"><h2 style="margin:0">All vouchers</h2>' +
+        '<a class="btn sm" href="/api/vouchers/print?all=1" target="_blank" title="Print every unused voucher">Print all unused</a></div>' +
+        '<p class="muted" style="margin:0 0 10px">Click a batch id to print that batch.</p>' +
+        '<table><thead><tr><th>Code</th><th>Plan</th><th>Status</th><th>Valid</th><th>Batch</th><th></th></tr></thead>' +
         '<tbody id="v-tbody">' + voucherRows(vouchers) + '</tbody></table></div>';
       bindRevoke();
       var gen = view.querySelector('#v-gen');
@@ -244,7 +295,7 @@
           '</td><td>' + esc(m.plan_name || '—') + '</td><td>' + esc(m.expires_at) + '</td>' +
           '<td><button class="btn sm danger" data-forget="' + esc(m.mac) + '">Forget</button></td></tr>';
       }).join('') : '<tr><td colspan="5" class="empty">No remembered devices. They appear when someone logs in on a MAC-remember plan.</td></tr>';
-      view.innerHTML = '<h1>Remembered devices</h1><p class="sub">Devices that auto-reconnect by MAC until their window expires. Forgetting one sends them back to the portal.</p>' +
+      view.innerHTML = '<h1>Devices</h1><p class="sub">Devices that auto-reconnect by MAC until their window expires. Forgetting one sends them back to the portal.</p>' +
         '<div class="card"><table><thead><tr><th>MAC</th><th>First login</th><th>Plan</th><th>Expires</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>';
       view.querySelectorAll('[data-forget]').forEach(function (b) {
         b.onclick = function () { api('/api/mac/' + encodeURIComponent(b.dataset.forget), { method: 'DELETE' }).then(function () { toast('Device forgotten'); tabs.devices(); }).catch(function (e) { toast(e.message, true); }); };
@@ -2271,9 +2322,9 @@
 
   // ---- nav ----
   var current = '';
-  var TITLES = { active: 'Active users', devices: 'Remembered devices', plans: 'Plans', vouchers: 'Vouchers',
+  var TITLES = { active: 'Active sessions', devices: 'Devices', plans: 'Plans', vouchers: 'Vouchers',
     accounts: 'Accounts', plugins: 'Guest lookup', guests: 'Guests', logs: 'Logs', settings: 'Settings',
-    announcements: 'Announcements', system: 'System', router: 'Router setup', backup: 'Backup', help: 'Help',
+    announcements: 'Announcements', system: 'System', router: 'Router setup', backup: 'Backup & migrate', help: 'Help',
     designs: 'Designs' };
   function show(tab, opts) {
     opts = opts || {};
@@ -2317,15 +2368,20 @@
     api('/api/notices').then(function (r) {
       var dismissed = dismissedMap();
       var anns = (r.announcements || []).filter(function (a) { return dismissed[a.id] !== a.updated_at; });
-      var probs = r.problems || [];
+      // Problem lines can be dismissed too (keyed by event id; the lookup
+      // roll-up's id changes with every new failure, so it resurfaces when
+      // there is something new to see).
+      var probs = (r.problems || []).filter(function (p) { return !dismissed['ev:' + p.id]; });
       if (!anns.length && !probs.length) { noticesEl.innerHTML = ''; return; }
       var html = anns.map(function (a) {
         return '<div class="notice ' + esc(a.severity) + '"><div class="notice-body"><b>' + esc(a.title) + '</b>' +
           (a.body ? '<span>' + esc(a.body) + '</span>' : '') + '</div>' +
           '<button class="notice-x" data-dismiss="' + a.id + '" data-upd="' + esc(a.updated_at) + '" title="Dismiss">×</button></div>';
       }).join('') + probs.map(function (p) {
+        var link = p.link || 'logs/events';
         return '<div class="notice-line ' + esc(p.level) + '"><span class="dot"></span> <span>' + esc(p.message) +
-          '</span> <a href="#logs/events" data-tab="logs/events">View events</a></div>';
+          '</span> <a href="#' + esc(link) + '" data-tab="' + esc(link) + '">View events</a>' +
+          '<button class="notice-x" data-dismiss="ev:' + esc(String(p.id)) + '" data-upd="1" title="Dismiss">×</button></div>';
       }).join('');
       noticesEl.innerHTML = html;
       noticesEl.querySelectorAll('[data-dismiss]').forEach(function (b) {

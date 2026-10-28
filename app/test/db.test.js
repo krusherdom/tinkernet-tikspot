@@ -157,6 +157,22 @@ test('listEvents level filter (warn returns warn+error) and recentProblems', () 
   const problems = recentProblems(db, { hours: 24, limit: 10 });
   assert.equal(problems.length, 2);
   assert.ok(problems.every((p) => p.level === 'warn' || p.level === 'error'));
+
+  // Per-attempt lookup outcomes are rolled up into one line with a count;
+  // other plugin problems still show individually.
+  logEvent(db, 'warn', 'plugin', 'Lookup refused: room 101 / name Smith — guest system error (HTTP 500) (plugin P)');
+  logEvent(db, 'warn', 'plugin', 'Lookup refused: room 102 / name Jones — guest system timed out (plugin P)');
+  logEvent(db, 'error', 'plugin', 'Lookup failed: boom');
+  logEvent(db, 'warn', 'plugin', 'Catalog fetch failed: 503');
+  const rolled = recentProblems(db, { hours: 24, limit: 10 });
+  assert.equal(rolled.filter((p) => /^Lookup /.test(p.message)).length, 0, 'no per-attempt rows');
+  const roll = rolled.find((p) => p.rollup);
+  assert.ok(roll, 'roll-up present');
+  assert.equal(roll.count, 3);
+  assert.match(roll.message, /^3 guest lookups failed/);
+  assert.equal(roll.link, 'logs/events');
+  assert.ok(rolled.some((p) => p.message === 'Catalog fetch failed: 503'));
+  assert.equal(rolled.length, 4); // roll-up + catalog + the two radius rows
 });
 
 // ---------------------------------------------------------------------------
@@ -509,4 +525,112 @@ test('HTTP: GET /api/blocks and the design create/draft/publish/activate/version
   // But an inactive (imported) one can be deleted.
   res = await app.inject({ method: 'DELETE', url: `/api/designs/${importedId}` });
   assert.equal(res.statusCode, 200);
+});
+
+test('HTTP: GET /api/vouchers/print renders a batch sheet with cols, validity, escaping and no revoked codes', async () => {
+  const { default: manageRoutes } = await import('../src/admin/manage.js');
+  const db = freshDb();
+  const app = Fastify();
+  app.decorate('db', db);
+  await app.register(manageRoutes);
+
+  let res = await app.inject({ method: 'POST', url: '/api/plans', payload: { name: '<b>Day</b> pass', rate_limit: '2M/2M' } });
+  assert.equal(res.statusCode, 200, res.body);
+  const planId = res.json().id;
+
+  res = await app.inject({
+    method: 'POST',
+    url: '/api/vouchers/batch',
+    payload: { plan_id: planId, count: 3, valid_from: '2099-07-01', valid_until: '2099-07-31' },
+  });
+  assert.equal(res.statusCode, 200, res.body);
+  const { batch_id: batchId, codes } = res.json();
+  assert.equal(codes.length, 3);
+
+  res = await app.inject({ method: 'GET', url: `/api/vouchers?batch=${batchId}` });
+  const revoked = res.json().vouchers[0];
+  res = await app.inject({ method: 'POST', url: `/api/vouchers/${revoked.id}/revoke` });
+  assert.equal(res.statusCode, 200, res.body);
+
+  res = await app.inject({ method: 'GET', url: `/api/vouchers/print?batch=${batchId}` });
+  assert.equal(res.statusCode, 200);
+  assert.match(res.headers['content-type'], /text\/html/);
+  const html = res.body;
+  assert.match(html, /break-inside/);
+  assert.match(html, /--cols:3/);
+  for (const c of codes.filter((c) => c !== revoked.code)) assert.ok(html.includes(c), `missing ${c}`);
+  assert.ok(!html.includes(revoked.code), 'revoked code must not print');
+  assert.ok(html.includes('&lt;b&gt;Day&lt;/b&gt; pass'), 'plan name is escaped');
+  assert.ok(!html.includes('<b>Day</b>'));
+  assert.ok(html.includes('2M/2M'));
+  assert.ok(html.includes('Valid 1/7/2099 – 31/7/2099'));
+  assert.match(html, /2 voucher\(s\)/);
+
+  for (const [q, want] of [['4', 4], ['9', 4], ['1', 2], ['2', 2], ['abc', 3]]) {
+    res = await app.inject({ method: 'GET', url: `/api/vouchers/print?batch=${batchId}&cols=${q}` });
+    assert.equal(res.statusCode, 200);
+    assert.ok(res.body.includes(`--cols:${want}`), `cols=${q} -> --cols:${want}`);
+  }
+
+  res = await app.inject({ method: 'GET', url: '/api/vouchers/print?all=1' });
+  assert.equal(res.statusCode, 200);
+  assert.match(res.body, /2 voucher\(s\)/);
+  await app.close();
+});
+
+// ---------------------------------------------------------------------------
+// /api/plans: edit any plan (incl. the seeded free one); a partial PATCH keeps
+// the limits it doesn't mention; DELETE refuses the free plan.
+test('HTTP: PATCH /api/plans/:id edits limits (free plan too) without wiping omitted ones', async () => {
+  const { default: manageRoutes } = await import('../src/admin/manage.js');
+  const { seedDefaults } = await import('../src/seed.js');
+  const db = freshDb();
+  seedDefaults(db);
+  const app = Fastify();
+  app.decorate('db', db);
+  await app.register(manageRoutes);
+
+  const free = db.prepare("SELECT * FROM plans WHERE radius_groupname = 'free'").get();
+  assert.ok(free, 'free plan seeded');
+  const groupReply = (g) => db.prepare('SELECT attribute, value FROM radgroupreply WHERE groupname = ? ORDER BY attribute').all(g);
+  assert.ok(groupReply('free').some((r) => r.attribute === 'Mikrotik-Total-Limit'), 'seeded free plan has a data cap');
+
+  // Full edit of the free plan: new rate, no data cap, no session timeout, MAC validity 3 days.
+  let res = await app.inject({
+    method: 'PATCH',
+    url: `/api/plans/${free.id}`,
+    payload: { name: 'Free', rate_limit: '100M/20M', total_limit_bytes: null, session_timeout_secs: null, mac_remember: true, mac_validity_secs: 3 * 86400, expiry_mode: 'fixed' },
+  });
+  assert.equal(res.statusCode, 200, res.body);
+  let row = db.prepare('SELECT * FROM plans WHERE id = ?').get(free.id);
+  assert.equal(row.rate_limit, '100M/20M');
+  assert.equal(row.total_limit_bytes, null);
+  assert.equal(row.session_timeout_secs, null);
+  assert.equal(row.mac_remember, 1);
+  assert.equal(row.mac_validity_secs, 3 * 86400);
+  const reply = groupReply('free');
+  assert.deepEqual(reply.map((r) => r.attribute), ['Mikrotik-Rate-Limit']);
+  assert.equal(reply[0].value, '100M/20M');
+
+  // Partial PATCH (name only) leaves every limit alone.
+  res = await app.inject({ method: 'PATCH', url: `/api/plans/${free.id}`, payload: { name: 'Free Wi-Fi' } });
+  assert.equal(res.statusCode, 200, res.body);
+  row = db.prepare('SELECT * FROM plans WHERE id = ?').get(free.id);
+  assert.equal(row.name, 'Free Wi-Fi');
+  assert.equal(row.rate_limit, '100M/20M');
+  assert.equal(row.mac_validity_secs, 3 * 86400);
+  assert.equal(row.radius_groupname, 'free', 'group name is immutable');
+
+  // An explicit null clears a limit.
+  res = await app.inject({ method: 'PATCH', url: `/api/plans/${free.id}`, payload: { rate_limit: null } });
+  assert.equal(res.statusCode, 200, res.body);
+  assert.equal(db.prepare('SELECT rate_limit FROM plans WHERE id = ?').get(free.id).rate_limit, null);
+  assert.equal(groupReply('free').length, 0);
+
+  // Validation still applies; the free plan still can't be deleted.
+  res = await app.inject({ method: 'PATCH', url: `/api/plans/${free.id}`, payload: { rate_limit: 'fast' } });
+  assert.equal(res.statusCode, 400);
+  res = await app.inject({ method: 'DELETE', url: `/api/plans/${free.id}` });
+  assert.equal(res.statusCode, 400);
+  assert.match(res.json().error, /free plan/);
 });

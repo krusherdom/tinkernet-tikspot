@@ -14,6 +14,16 @@ import { getNasSecret } from '../radius/nas.js';
 import { validateRateLimit, validateNonNegInt, validatePassword, validateExpiryMode } from './validate.js';
 import { logAudit } from './audit.js';
 
+// HTML-escape for the server-rendered print sheet.
+function esc(s) {
+  return String(s ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
 function slugify(s) {
   return String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48) || 'plan';
 }
@@ -106,15 +116,19 @@ export default async function manageRoutes(app) {
     // expiry_mode is only updated when the field is present in the request.
     const expiryProvided = b.expiry_mode !== undefined;
     // radius_groupname is immutable (members reference it); limits/name editable.
+    // A limit is only changed when its key is present in the body (an explicit
+    // null clears it) — so PATCH {name} never wipes the limits. The free plan
+    // is editable like any other; only DELETE refuses it.
+    const has = (k) => Object.prototype.hasOwnProperty.call(b, k);
     db.prepare(
       `UPDATE plans SET
          name = COALESCE(@name, name),
          kind = COALESCE(@kind, kind),
-         rate_limit = @rate_limit,
-         total_limit_bytes = @total_limit_bytes,
-         session_timeout_secs = @session_timeout_secs,
+         rate_limit = CASE WHEN @has_rate = 1 THEN @rate_limit ELSE rate_limit END,
+         total_limit_bytes = CASE WHEN @has_total = 1 THEN @total_limit_bytes ELSE total_limit_bytes END,
+         session_timeout_secs = CASE WHEN @has_session = 1 THEN @session_timeout_secs ELSE session_timeout_secs END,
          mac_remember = COALESCE(@mac_remember, mac_remember),
-         mac_validity_secs = @mac_validity_secs,
+         mac_validity_secs = CASE WHEN @has_mac_validity = 1 THEN @mac_validity_secs ELSE mac_validity_secs END,
          expiry_mode = CASE WHEN @expiry_provided = 1 THEN @expiry_mode ELSE expiry_mode END,
          updated_at = datetime('now')
        WHERE id = @id`,
@@ -122,17 +136,22 @@ export default async function manageRoutes(app) {
       id,
       name: b.name ?? null,
       kind: b.kind ?? null,
+      has_rate: has('rate_limit') ? 1 : 0,
       rate_limit: limits.rate_limit,
+      has_total: has('total_limit_bytes') ? 1 : 0,
       total_limit_bytes: limits.total_limit_bytes,
+      has_session: has('session_timeout_secs') ? 1 : 0,
       session_timeout_secs: limits.session_timeout_secs,
       mac_remember: b.mac_remember == null ? null : b.mac_remember ? 1 : 0,
+      has_mac_validity: has('mac_validity_secs') ? 1 : 0,
       mac_validity_secs: limits.mac_validity_secs,
       expiry_provided: expiryProvided ? 1 : 0,
       expiry_mode: expiry.value,
     });
-    syncPlanToRadius(db, getPlan(db, id));
-    logAudit(db, req, 'plan.update', `${plan.name} (#${id})`);
-    return { ok: true };
+    const updated = getPlan(db, id);
+    syncPlanToRadius(db, updated);
+    logAudit(db, req, 'plan.update', `${updated.name} (#${id})`);
+    return { ok: true, plan: updated };
   });
 
   app.delete('/api/plans/:id', async (req, reply) => {
@@ -197,24 +216,20 @@ export default async function manageRoutes(app) {
     return { vouchers };
   });
 
-  // Printable sheet of vouchers (by batch, or all unused). Opens ready to print.
+  // Printable sheet of vouchers (by batch, all unused with ?all=1, or the latest
+  // 200 unused). Opens ready to print; ?cols=2|3|4 sets cards per row.
   app.get('/api/vouchers/print', async (req, reply) => {
-    const { batch } = req.query ?? {};
+    const { batch, all } = req.query ?? {};
+    const colsRaw = Number.parseInt(req.query?.cols, 10);
+    const cols = Number.isFinite(colsRaw) ? Math.min(Math.max(colsRaw, 2), 4) : 3;
+    const select = `SELECT v.code, v.valid_from, v.valid_until, p.name AS plan_name, p.rate_limit,
+                           p.session_timeout_secs, p.total_limit_bytes
+                      FROM vouchers v LEFT JOIN plans p ON p.id = v.plan_id`;
     const rows = batch
-      ? db
-          .prepare(
-            `SELECT v.code, p.name AS plan_name, p.rate_limit, p.session_timeout_secs, p.total_limit_bytes
-               FROM vouchers v LEFT JOIN plans p ON p.id = v.plan_id
-              WHERE v.batch_id = ? AND v.status = 'unused' ORDER BY v.code`,
-          )
-          .all(batch)
-      : db
-          .prepare(
-            `SELECT v.code, p.name AS plan_name, p.rate_limit, p.session_timeout_secs, p.total_limit_bytes
-               FROM vouchers v LEFT JOIN plans p ON p.id = v.plan_id
-              WHERE v.status = 'unused' ORDER BY v.id DESC LIMIT 200`,
-          )
-          .all();
+      ? db.prepare(`${select} WHERE v.batch_id = ? AND v.status = 'unused' ORDER BY v.code`).all(batch)
+      : all === '1' || all === 'true'
+        ? db.prepare(`${select} WHERE v.status = 'unused' ORDER BY v.id DESC`).all()
+        : db.prepare(`${select} WHERE v.status = 'unused' ORDER BY v.id DESC LIMIT 200`).all();
     const human = (r) => {
       const bits = [];
       if (r.session_timeout_secs) bits.push(Math.round(r.session_timeout_secs / 60) + ' min');
@@ -222,25 +237,57 @@ export default async function manageRoutes(app) {
       if (r.rate_limit) bits.push(r.rate_limit);
       return bits.join(' · ');
     };
+    // "2026-07-01 00:00:00" -> "1/7/2026" (stored dates are already router-local).
+    const dmy = (s) => {
+      const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s ?? ''));
+      return m ? `${Number(m[3])}/${Number(m[2])}/${m[1]}` : '';
+    };
+    const validity = (r) => {
+      const from = dmy(r.valid_from);
+      const until = dmy(r.valid_until);
+      if (from && until) return `Valid ${from} – ${until}`;
+      if (from) return `Valid from ${from}`;
+      if (until) return `Valid until ${until}`;
+      return '';
+    };
     const cards = rows
-      .map(
-        (r) =>
-          `<div class="v"><div class="code">${r.code}</div>` +
-          `<div class="plan">${(r.plan_name || '').replace(/[<>]/g, '')}</div>` +
-          `<div class="meta">${human(r)}</div></div>`,
-      )
+      .map((r) => {
+        const valid = validity(r);
+        return (
+          `<div class="v"><div class="code">${esc(r.code)}</div>` +
+          `<div class="plan">${esc(r.plan_name || '')}</div>` +
+          `<div class="meta">${esc(human(r))}</div>` +
+          (valid ? `<div class="valid">${esc(valid)}</div>` : '') +
+          `</div>`
+        );
+      })
+      .join('');
+    const colOpts = [2, 3, 4]
+      .map((n) => `<option value="${n}"${n === cols ? ' selected' : ''}>${n}</option>`)
       .join('');
     reply.type('text/html').send(`<!doctype html><html><head><meta charset="utf-8">
 <title>Vouchers</title><style>
+@page{size:auto;margin:10mm}
 body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;margin:18px;color:#111}
-.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
-.v{border:1px dashed #aaa;border-radius:10px;padding:14px;text-align:center}
-.code{font-size:22px;font-weight:700;letter-spacing:2px;font-family:ui-monospace,Menlo,monospace}
-.plan{margin-top:6px;font-size:13px;color:#333}.meta{font-size:11px;color:#777;margin-top:2px}
-@media print{.noprint{display:none}}
+.noprint{display:flex;gap:12px;align-items:center;margin:0 0 14px}
+.grid{display:grid;grid-template-columns:repeat(var(--cols,3),1fr);gap:10px}
+.v{border:1px dashed #666;border-radius:10px;padding:14px;text-align:center;break-inside:avoid;page-break-inside:avoid;min-height:38mm;box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact;display:flex;flex-direction:column;justify-content:center}
+.code{font-size:22px;font-weight:700;letter-spacing:2px;font-family:ui-monospace,Menlo,monospace;word-break:break-all}
+.plan{margin-top:6px;font-size:13px;color:#333}.meta,.valid{font-size:11px;color:#555;margin-top:2px}
+@media print{
+body{margin:0}
+.noprint{display:none}
+.grid{gap:4mm}
+.v{padding:4mm;border-radius:3mm;border:0.3mm dashed #666}
+.code{font-size:16pt;letter-spacing:1pt}
+.plan{margin-top:1.5mm;font-size:10pt}
+.meta,.valid{font-size:8pt;margin-top:0.5mm}
+}
 </style></head><body>
-<p class="noprint">${rows.length} voucher(s). <button onclick="print()">Print</button></p>
-<div class="grid">${cards}</div></body></html>`);
+<div class="noprint">${rows.length} voucher(s).
+<label>Columns <select id="cols" onchange="var u=new URL(location.href);u.searchParams.set('cols',this.value);location.href=u.href">${colOpts}</select></label>
+<button onclick="print()">Print</button></div>
+<div class="grid" style="--cols:${cols}">${cards}</div></body></html>`);
   });
 
   app.post('/api/vouchers/:id/revoke', async (req, reply) => {

@@ -45,13 +45,18 @@
 .cp-logo { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 4px 0 14px; }
 .cp-logo img { max-width: 100%; height: auto; display: block; }
 .cp-logo__txt { font-weight: 800; font-size: 15px; letter-spacing: 0.04em; color: #1761B0; text-transform: uppercase; }
+.cp-block--color .cp-logo__txt { color: inherit; }
 /* theme.logoPosition = 'left' */
 .cp-logo-left .cp-logo { flex-direction: row; align-items: center; justify-content: flex-start; }
 
 /* text blocks */
-.cp-heading { font-size: var(--cp-hsize, 24px); font-weight: 700; color: #16202B; margin: 2px 0 12px; line-height: 1.2; }
-.cp-text { font-size: 14px; color: #5A6976; margin: 0 0 12px; line-height: 1.55; }
-.cp-text.is-muted { font-size: 12px; color: #93A1B0; margin-top: 8px; }
+/* No hard-coded colours: text inherits the theme colour from .cp-card, or a
+   block's own colour from its .cp-block wrapper (style.color). */
+.cp-heading { font-size: var(--cp-hsize, 24px); font-weight: 700; color: inherit; margin: 2px 0 12px; line-height: 1.2; }
+.cp-text { font-size: 14px; color: inherit; margin: 0 0 12px; line-height: 1.55; }
+.cp-text.is-muted { font-size: 12px; opacity: .7; margin-top: 8px; }
+/* The un-wrapped "Connecting…" card subtitle keeps its softer secondary look. */
+.cp-card > .cp-text { opacity: .78; }
 .cp-al-center { text-align: center; }
 .cp-al-left { text-align: left; }
 .cp-al-right { text-align: right; }
@@ -91,13 +96,16 @@ a.cp-btn { display: block; text-align: center; text-decoration: none; box-sizing
 /* button-link / divider / html / terms / columns */
 .cp-divider { border: none; border-top: 1px solid #E3E8EF; margin: 14px 0; }
 .cp-terms {
-  display: flex; align-items: flex-start; gap: 8px; font-size: 13px; color: #5A6976;
+  display: flex; align-items: flex-start; gap: 8px; font-size: 13px; color: inherit;
   line-height: 1.4; margin: 0 0 12px; cursor: pointer;
 }
 .cp-terms input { margin-top: 2px; flex: none; }
 .cp-terms a { color: var(--cp-accent, #2F8CEE); font-weight: 600; text-decoration: none; }
 .cp-html { font-size: 14px; color: inherit; line-height: 1.55; margin: 0 0 12px; }
 .cp-html img { max-width: 100%; height: auto; }
+/* style.fontSize on the wrapper overrides the class-level sizes inside it. */
+.cp-block--fs .cp-heading, .cp-block--fs .cp-text, .cp-block--fs .cp-text.is-muted,
+.cp-block--fs .cp-terms, .cp-block--fs .cp-html, .cp-block--fs .cp-logo__txt { font-size: inherit; }
 .cp-cols { display: flex; gap: 16px; align-items: flex-start; }
 .cp-cols .cp-col { flex: 1 1 0; min-width: 0; }
 @media (max-width: 560px) {

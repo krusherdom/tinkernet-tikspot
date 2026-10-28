@@ -45,8 +45,8 @@ Designs are versioned: keep several, publish one, revert to any earlier version.
 
 | | |
 |---|---|
-| **Active users** — live sessions from RADIUS accounting; kick via CoA | **Plans** — MikroTik speed / data / time limits, incl. renew-at-midnight |
-| [![Active users](docs/img/admin-active-users.png)](docs/img/admin-active-users.png) | [![Plans](docs/img/admin-plans.png)](docs/img/admin-plans.png) |
+| **Active sessions** — live sessions from RADIUS accounting; kick via CoA | **Plans** — MikroTik speed / data / time limits, incl. renew-at-midnight |
+| [![Active sessions](docs/img/admin-active-users.png)](docs/img/admin-active-users.png) | [![Plans](docs/img/admin-plans.png)](docs/img/admin-plans.png) |
 | **Vouchers** — printable batches with optional date windows | **Router setup** — probe, auto-configure, or copy a manual script |
 | [![Vouchers](docs/img/admin-vouchers.png)](docs/img/admin-vouchers.png) | [![Router setup](docs/img/admin-router-setup.png)](docs/img/admin-router-setup.png) |
 | **Guest lookup** — plugins that check a guest against your PMS, a CSV, or a built-in list | **Plugin catalog** — browse community recipes on GitHub and import in one click |

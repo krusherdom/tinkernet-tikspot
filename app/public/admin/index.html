@@ -7,26 +7,59 @@
   <link rel="stylesheet" href="/admin/admin.css">
 </head>
 <body>
+  <!-- Icon sprite (16px outlines, currentColor). Referenced by the sidebar via <use href="#i-…">. -->
+  <svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+    <symbol id="i-active" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+    <symbol id="i-devices" viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/></symbol>
+    <symbol id="i-logs" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></symbol>
+    <symbol id="i-system" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><path d="M6 6h.01M6 18h.01"/></symbol>
+    <symbol id="i-plans" viewBox="0 0 24 24"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><path d="M7 7h.01"/></symbol>
+    <symbol id="i-vouchers" viewBox="0 0 24 24"><path d="M2 9a3 3 0 0 1 0 6v3a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-3a3 3 0 0 1 0-6V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2z"/><path d="M13 5v2M13 17v2M13 11v2"/></symbol>
+    <symbol id="i-accounts" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></symbol>
+    <symbol id="i-plugins" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></symbol>
+    <symbol id="i-guests" viewBox="0 0 24 24"><path d="M3 21h18M5 21V7l8-4v18M19 21V11l-6-4"/><path d="M9 9v.01M9 12v.01M9 15v.01M9 18v.01"/></symbol>
+    <symbol id="i-designs" viewBox="0 0 24 24"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/><circle cx="11" cy="11" r="2"/></symbol>
+    <symbol id="i-editor" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></symbol>
+    <symbol id="i-announcements" viewBox="0 0 24 24"><path d="M3 11l18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></symbol>
+    <symbol id="i-portal" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></symbol>
+    <symbol id="i-router" viewBox="0 0 24 24"><rect x="2" y="14" width="20" height="6" rx="2"/><path d="M6 17h.01M10 17h.01"/><path d="M12 10a5 5 0 0 1 8 0"/><path d="M8.5 7a10 10 0 0 1 15 0"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></symbol>
+    <symbol id="i-backup" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></symbol>
+    <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></symbol>
+  </svg>
+
   <aside class="sidebar">
     <div class="brand">Tikspot</div>
     <nav id="nav">
-      <a data-tab="active" class="active">Active users</a>
-      <a data-tab="devices">Remembered devices</a>
-      <a data-tab="plans">Plans</a>
-      <a data-tab="vouchers">Vouchers</a>
-      <a data-tab="accounts">Accounts</a>
-      <a data-tab="plugins">Guest lookup</a>
-      <a data-tab="guests">Guests</a>
-      <a data-tab="logs">Logs</a>
-      <a data-tab="settings">Settings</a>
-      <a data-tab="announcements">Announcements</a>
-      <a data-tab="system">System</a>
-      <a data-tab="router">Router setup</a>
-      <a data-tab="backup">Backup</a>
-      <a data-tab="help">Help</a>
-      <a data-tab="designs">Designs</a>
-      <a class="ext" href="/admin/editor.html">Portal editor →</a>
-      <a class="ext" href="/login" target="_blank" rel="noopener">View portal →</a>
+      <div class="nav-group">
+        <h4>Monitor</h4>
+        <a data-tab="active" class="active"><svg><use href="#i-active"/></svg><span>Active sessions</span></a>
+        <a data-tab="devices"><svg><use href="#i-devices"/></svg><span>Devices</span></a>
+        <a data-tab="logs"><svg><use href="#i-logs"/></svg><span>Logs</span></a>
+        <a data-tab="system"><svg><use href="#i-system"/></svg><span>System</span></a>
+      </div>
+      <div class="nav-group">
+        <h4>Access</h4>
+        <a data-tab="plans"><svg><use href="#i-plans"/></svg><span>Plans</span></a>
+        <a data-tab="vouchers"><svg><use href="#i-vouchers"/></svg><span>Vouchers</span></a>
+        <a data-tab="accounts"><svg><use href="#i-accounts"/></svg><span>Accounts</span></a>
+        <a data-tab="plugins"><svg><use href="#i-plugins"/></svg><span>Guest lookup</span></a>
+        <a data-tab="guests"><svg><use href="#i-guests"/></svg><span>Guests</span></a>
+      </div>
+      <div class="nav-group">
+        <h4>Portal</h4>
+        <a data-tab="designs"><svg><use href="#i-designs"/></svg><span>Designs</span></a>
+        <a class="ext" href="/admin/editor.html"><svg><use href="#i-editor"/></svg><span>Portal editor →</span></a>
+        <a data-tab="announcements"><svg><use href="#i-announcements"/></svg><span>Announcements</span></a>
+        <a class="ext" href="/login" target="_blank" rel="noopener"><svg><use href="#i-portal"/></svg><span>View portal →</span></a>
+      </div>
+      <div class="nav-group">
+        <h4>Setup</h4>
+        <a data-tab="router"><svg><use href="#i-router"/></svg><span>Router setup</span></a>
+        <a data-tab="settings"><svg><use href="#i-settings"/></svg><span>Settings</span></a>
+        <a data-tab="backup"><svg><use href="#i-backup"/></svg><span>Backup &amp; migrate</span></a>
+        <a data-tab="help"><svg><use href="#i-help"/></svg><span>Help</span></a>
+      </div>
     </nav>
     <div class="ver"><a id="logout" class="logout">Log out</a><span id="ver"></span></div>
   </aside>

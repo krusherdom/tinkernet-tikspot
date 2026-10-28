@@ -55,7 +55,12 @@ function field(icon, inputHtml) {
   return `<div class="cp-field"><span class="cp-field__ico">${ICO[icon] || ''}</span>${inputHtml}</div>`;
 }
 
-// Render props.style (mt/mb/color/bg/align/hidden) into a wrapper class+style.
+// Render props.style (mt/mb/color/bg/align/fontSize/bold/hidden) into a wrapper
+// class+style. Inner text elements carry no colour of their own (portal.css
+// uses color:inherit), so the wrapper's colour/size/weight reach the text.
+// A coloured background also gets padding + rounded corners so it doesn't hug
+// the text. cp-block--fs / cp-block--color let portal.css make elements with a
+// class-level font-size / colour inherit from the wrapper instead.
 // `hidden` blocks render nothing on the live page but stay visible (dimmed) in
 // the editor preview, via data-hidden, so the editor can still select them.
 export function styleAttrs(style, ctx = {}) {
@@ -64,9 +69,14 @@ export function styleAttrs(style, ctx = {}) {
   if (s.mt) decls.push(`margin-top:${Number(s.mt) || 0}px`);
   if (s.mb) decls.push(`margin-bottom:${Number(s.mb) || 0}px`);
   if (s.color) decls.push(`color:${s.color}`);
-  if (s.bg) decls.push(`background:${s.bg}`);
+  if (s.bg) decls.push(`background:${s.bg}`, 'padding:10px 14px', 'border-radius:8px');
   if (s.align === 'left' || s.align === 'right' || s.align === 'center') decls.push(`text-align:${s.align}`);
+  const fs = Math.round(Number(s.fontSize) || 0);
+  if (fs > 0) decls.push(`font-size:${fs}px`);
+  if (s.bold) decls.push('font-weight:700');
   const cls = ['cp-block'];
+  if (fs > 0) cls.push('cp-block--fs');
+  if (s.color) cls.push('cp-block--color');
   if (s.hidden && ctx.preview) cls.push('cp-block--hidden');
   return {
     hidden: Boolean(s.hidden),
@@ -94,7 +104,8 @@ const RENDERERS = {
     return p.text ? `<div class="cp-logo"><span class="cp-logo__txt">${esc(p.text)}</span></div>` : '';
   },
   heading(p) {
-    const sz = p.size ? ` style="font-size:${esc(p.size)}px"` : '';
+    // A block-level style.fontSize (on the wrapper) wins over the heading's own size.
+    const sz = p.size && !(Number(p.style?.fontSize) > 0) ? ` style="font-size:${esc(p.size)}px"` : '';
     return `<h1 class="cp-heading ${alignClass(p.align)}"${sz}>${esc(p.text)}</h1>`;
   },
   text(p) {

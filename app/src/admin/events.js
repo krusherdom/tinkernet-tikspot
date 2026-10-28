@@ -51,13 +51,41 @@ export function listEvents(db, { level, source, limit = 100 } = {}) {
   return db.prepare(sql).all(...params, lim);
 }
 
-// Recent warn/error events for the admin notice strip.
+// Recent warn/error events for the admin notice strip. Per-attempt guest
+// lookup outcomes ("Lookup refused: …" / "Lookup failed: …", source
+// `plugin`) are rolled up into ONE line with a count — a flaky guest system
+// would otherwise fill every slot and hide real system problems. Other
+// `plugin` events (catalog fetch failed, …) still appear individually.
 export function recentProblems(db, { hours = 24, limit = 10 } = {}) {
-  return db
+  const since = `-${Math.max(1, Number(hours) || 24)} hours`;
+  const lim = Math.min(Math.max(Number(limit) || 10, 1), 50);
+  const rows = db
     .prepare(
       `SELECT id, level, source, message, created_at FROM events
         WHERE level IN ('warn','error') AND created_at >= datetime('now', ?)
+          AND NOT (source = 'plugin' AND message LIKE 'Lookup %')
         ORDER BY id DESC LIMIT ?`,
     )
-    .all(`-${Math.max(1, Number(hours) || 24)} hours`, Math.min(Math.max(Number(limit) || 10, 1), 50));
+    .all(since, lim);
+  const roll = db
+    .prepare(
+      `SELECT COUNT(*) AS n, MAX(id) AS id, MAX(created_at) AS created_at FROM events
+        WHERE level IN ('warn','error') AND created_at >= datetime('now', ?)
+          AND source = 'plugin' AND message LIKE 'Lookup %'`,
+    )
+    .get(since);
+  if (roll && roll.n > 0) {
+    const h = Math.max(1, Number(hours) || 24);
+    rows.unshift({
+      id: `lookup-rollup:${roll.id}`,
+      level: 'warn',
+      source: 'plugin',
+      message: `${roll.n} guest lookup${roll.n === 1 ? '' : 's'} failed (guest system error / timeout) in the last ${h} h`,
+      created_at: roll.created_at,
+      rollup: true,
+      count: roll.n,
+      link: 'logs/events',
+    });
+  }
+  return rows;
 }
