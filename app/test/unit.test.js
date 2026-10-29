@@ -453,6 +453,26 @@ test('verifyConfig: mac-auth-mode must be mac-as-username; mac-cookie mismatch i
     .find((c) => c.component.startsWith('Hotspot MAC cookies')).status, 'pass');
 });
 
+test('verifyConfig judges the profile the hotspot server uses, not the first profile on the router', async () => {
+  const containerIp = '10.0.0.5';
+  const serverHost = 'wifi.example.com';
+  const fx = verifyFixtures({ containerIp, serverHost });
+  // RouterOS's built-in "default" profile keeps stock values (mac-cookie, and-password)
+  // but no server references it; the server uses a clean "tikspot" profile.
+  fx['/ip/hotspot/profile'] = [
+    { '.id': '*2', name: 'default', 'use-radius': 'yes', 'login-by': 'mac,http-chap,http-pap,mac-cookie', 'mac-auth-mode': 'mac-as-username-and-password' },
+    { '.id': '*9', name: 'tikspot', 'use-radius': 'yes', 'login-by': 'mac,http-chap,http-pap', 'mac-auth-mode': 'mac-as-username' },
+  ];
+  fx['/ip/hotspot'] = [{ '.id': '*3', name: serverHost, interface: 'bridge1', profile: 'tikspot' }];
+  const router = { list: async (menu) => fx[menu], call: async () => ({ status: 'finished' }) };
+  const res = await verifyCfg2(router, { containerIp, serverHost });
+  const find = (prefix) => res.checks.find((c) => c.component.startsWith(prefix));
+  assert.equal(find('Hotspot MAC cookies').status, 'pass');
+  assert.equal(find('Hotspot profile mac-auth-mode').status, 'pass');
+  assert.match(find('Login methods include http-pap').raw, /name=tikspot/);
+  assert.equal(res.ok, true);
+});
+
 test('ensureDnsRemoteRequests patches the single /ip/dns object only when off', async () => {
   const calls = [];
   const off = stubRouter({ '/ip/dns': [{ 'allow-remote-requests': 'false' }] }, calls);

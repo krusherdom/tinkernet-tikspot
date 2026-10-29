@@ -592,6 +592,17 @@ export async function verifyConfig(router, { containerIp, serverHost, macCookie 
 
   // --- Hotspot server bound to a RADIUS profile ---------------------------
   const radiusProfiles = profiles.ok ? profiles.rows.filter((p) => yes(p['use-radius'])) : [];
+  // The profile that matters is the one a hotspot SERVER references (the
+  // built-in "default" profile is usually unused and keeps RouterOS defaults such
+  // as mac-cookie) — prefer the profile of the server named after the portal
+  // host, then any server's profile, then fall back to the first RADIUS profile.
+  const profileInUse = (() => {
+    if (!profiles.ok || !servers.ok) return null;
+    const byName = new Map(profiles.rows.map((p) => [p.name, p]));
+    const named = host ? servers.rows.find((sv) => String(sv.name || '').split('|')[0].trim() === host) : null;
+    const srv = named || servers.rows.find((sv) => byName.has(sv.profile));
+    return srv ? byName.get(srv.profile) || null : null;
+  })();
   {
     const c = 'Hotspot server uses a RADIUS profile';
     const o = { docs: 'hotspot-profile', hint: 'A hotspot server must reference a profile with use-radius=yes, otherwise logins never reach Tikspot.' };
@@ -639,7 +650,7 @@ export async function verifyConfig(router, { containerIp, serverHost, macCookie 
 
   // --- login-by methods ---------------------------------------------------
   {
-    const prof = radiusProfiles[0] || (profiles.ok ? profiles.rows[0] : null);
+    const prof = profileInUse || radiusProfiles[0] || (profiles.ok ? profiles.rows[0] : null);
     const loginBy = String(prof?.['login-by'] || '');
     const parts = loginBy.split(',').map((s) => s.trim()).filter(Boolean);
     const c = 'Login methods include http-pap and mac';
@@ -682,7 +693,7 @@ export async function verifyConfig(router, { containerIp, serverHost, macCookie 
   // that only matches when RouterOS sends the MAC as the username with an empty
   // password (mac-as-username, the RouterOS default).
   {
-    const prof = radiusProfiles[0] || (profiles.ok ? profiles.rows[0] : null);
+    const prof = profileInUse || radiusProfiles[0] || (profiles.ok ? profiles.rows[0] : null);
     const c = 'Hotspot profile mac-auth-mode';
     const o = {
       docs: 'login-methods',
