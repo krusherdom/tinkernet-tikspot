@@ -72,7 +72,7 @@
 .cp-field__ico { color: #93A1B0; display: inline-flex; flex: none; }
 .cp-field input {
   flex: 1; border: none; background: transparent; outline: none;
-  font-size: 14px; color: #16202B; font-family: inherit; min-width: 0;
+  font-size: 16px; color: #16202B; font-family: inherit; min-width: 0; /* ≥16px: iOS Safari auto-zooms the page into any smaller input on focus */
 }
 .cp-field input::placeholder { color: #9AA7B4; }
 .cp-btn {
