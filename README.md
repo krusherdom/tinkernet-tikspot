@@ -218,6 +218,8 @@ configured in the admin wizard and stored in `/data`.
 | `TIKSPOT_DATA_DIR` / `TIKSPOT_ASSETS_DIR` | `/data` / `/data/assets` | Persistent data + branding uploads |
 | `TIKSPOT_HOST` / `TIKSPOT_PORT` | `0.0.0.0` / `80` | Listen address |
 | `TIKSPOT_RADIUS_CLIENT_NET` / `_NET6` | `0.0.0.0/0` / `::/0` | Source range FreeRADIUS trusts (the secret is the gate) |
+| `TIKSPOT_RADIUS_REQUIRE_MA` | `yes` | Require Message-Authenticator from the router (BlastRADIUS, CVE-2024-3596). Set `no` only for RouterOS older than 7.15 |
+| `TIKSPOT_RADIUS_REQUIRE_MA` | `yes` | Require Message-Authenticator from the router (BlastRADIUS). Set `no` only for RouterOS < 7.15 |
 | `LOG_LEVEL` | `info` | Fastify log level |
 
 ## Security notes

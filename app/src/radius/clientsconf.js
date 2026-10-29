@@ -18,9 +18,16 @@ import { ensureNasSecret } from './nas.js';
 const RADDB_DIR = process.env.TIKSPOT_RADDB_DIR ?? '/etc/raddb';
 const CLIENT_NET = process.env.TIKSPOT_RADIUS_CLIENT_NET ?? '0.0.0.0/0';
 const CLIENT_NET6 = process.env.TIKSPOT_RADIUS_CLIENT_NET6 ?? '::/0';
+// BlastRADIUS (CVE-2024-3596) hardening: require Message-Authenticator on every
+// request from the LAN clients. RouterOS 7.15+ always sends it (and asks for it
+// back); set TIKSPOT_RADIUS_REQUIRE_MA=no only for a NAS too old to send it —
+// FreeRADIUS then logs the 'client has been updated' advisory instead.
+const REQUIRE_MA = !/^(0|no|false|off)$/i.test(process.env.TIKSPOT_RADIUS_REQUIRE_MA ?? 'yes');
 
-function block(name, addrLine, secret) {
-  return `client ${name} {\n\t${addrLine}\n\tsecret = ${secret}\n\tproto = *\n}\n`;
+function block(name, addrLine, secret, requireMa = false) {
+  const flag = REQUIRE_MA ? 'yes' : 'no';
+  const ma = requireMa ? `\n\trequire_message_authenticator = ${flag}\n\tlimit_proxy_state = ${flag}` : '';
+  return `client ${name} {\n\t${addrLine}\n\tsecret = ${secret}\n\tproto = *${ma}\n}\n`;
 }
 
 export function renderClientsConf(secret) {
@@ -30,8 +37,8 @@ export function renderClientsConf(secret) {
     '# More-specific localhost entries win for loopback; the /0 client catches the rest.\n' +
     block('localhost', 'ipaddr = 127.0.0.1', secret) +
     block('localhost_ipv6', 'ipv6addr = ::1', secret) +
-    block('tikspot_net', `ipaddr = ${CLIENT_NET}`, secret) +
-    block('tikspot_net6', `ipv6addr = ${CLIENT_NET6}`, secret)
+    block('tikspot_net', `ipaddr = ${CLIENT_NET}`, secret, true) +
+    block('tikspot_net6', `ipv6addr = ${CLIENT_NET6}`, secret, true)
   );
 }
 

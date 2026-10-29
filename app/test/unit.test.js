@@ -157,6 +157,10 @@ test('renderClientsConf embeds the secret and trusts localhost + a LAN range', (
   // A catch-all client so a router at any LAN IP is accepted (the gap this fixes).
   assert.match(conf, /ipaddr = 0\.0\.0\.0\/0/);
   assert.match(conf, /ipv6addr = ::\/0/);
+  // BlastRADIUS: LAN clients must send Message-Authenticator; localhost is exempt.
+  assert.equal((conf.match(/require_message_authenticator = yes/g) || []).length, 2);
+  assert.equal((conf.match(/limit_proxy_state = yes/g) || []).length, 2);
+  assert.doesNotMatch(conf.split('client tikspot_net')[0], /require_message_authenticator/);
 });
 
 // ---------------------------------------------------------------------------
