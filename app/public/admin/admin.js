@@ -2483,13 +2483,26 @@
         return '<div class="notice ' + esc(a.severity) + '"><div class="notice-body"><b>' + esc(a.title) + '</b>' +
           (a.body ? '<span>' + esc(a.body) + '</span>' : '') + '</div>' +
           '<button class="notice-x" data-dismiss="' + a.id + '" data-upd="' + esc(a.updated_at) + '" title="Dismiss">×</button></div>';
-      }).join('') + probs.map(function (p) {
-        var link = p.link || 'logs/events';
-        return '<div class="notice-line ' + esc(p.level) + '"><span class="dot"></span> <span>' + esc(p.message) +
-          '</span> <a href="#' + esc(link) + '" data-tab="' + esc(link) + '">View events</a>' +
-          '<button class="notice-x" data-dismiss="ev:' + esc(String(p.id)) + '" data-upd="1" title="Dismiss">×</button></div>';
       }).join('');
+      if (probs.length) {
+        var worst = probs.some(function (p) { return p.level === 'error'; }) ? 'error' : 'warn';
+        html += '<div class="notice-panel ' + worst + '"><div class="notice-head">' +
+          '<b>Needs attention</b><span class="muted">warnings and errors from the last 24 h, newest first</span>' +
+          '<a href="#logs/events" data-tab="logs/events">All events</a>' +
+          '<button class="btn sm" id="notice-clear" title="Hide these until something new happens">Dismiss all</button></div>' +
+          probs.map(function (p) {
+            var when = sqlIso(p.created_at);
+            return '<div class="notice-line ' + esc(p.level) + '">' +
+              '<span class="pill ' + (p.level === 'error' ? 'off' : 'warn') + '">' + (p.level === 'error' ? 'error' : 'warning') + '</span>' +
+              '<span class="notice-src mono">' + esc(p.source || '') + '</span>' +
+              '<span class="notice-msg">' + esc(p.message) + '</span>' +
+              '<span class="notice-when muted" title="' + esc(sqlLocal(p.created_at)) + '">' + esc(relTime(when)) + '</span>' +
+              '<button class="notice-x" data-dismiss="ev:' + esc(String(p.id)) + '" data-upd="1" title="Dismiss">×</button></div>';
+          }).join('') + '</div>';
+      }
       noticesEl.innerHTML = html;
+      var clear = noticesEl.querySelector('#notice-clear');
+      if (clear) clear.onclick = function () { probs.forEach(function (p) { setDismissed('ev:' + p.id, '1'); }); renderNotices(); };
       noticesEl.querySelectorAll('[data-dismiss]').forEach(function (b) {
         b.onclick = function () { setDismissed(b.dataset.dismiss, b.dataset.upd); renderNotices(); };
       });
